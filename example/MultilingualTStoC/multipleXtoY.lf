@@ -1,0 +1,11 @@
+target Multiple;
+
+import X.lf;
+import Y.lf;
+
+federated reactor minimal {
+    x = new X();
+    y = new Y();
+    
+    x.xOut ~> y.yIn after 10 msec;
+} 

@@ -1,0 +1,12 @@
+target TypeScript;
+reactor B {
+    input bIn:Buffer;
+    reaction(startup) {=
+        console.log("startup print");
+    =}
+    reaction(bIn) {=
+        if (bIn !== undefined) {
+            console.log("Received: " + bIn.toString());
+        }
+    =}
+}

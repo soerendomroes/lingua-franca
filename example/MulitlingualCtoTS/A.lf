@@ -1,0 +1,16 @@
+target C;
+reactor A {
+    output aOut:char*;
+    reaction(startup) {=
+        printf("startup print\n");
+    =}
+    reaction(startup) -> aOut {=
+        string toSend = "Hi from C!";
+        // With NULL, 0 arguments, snprintf tells us how many bytes are needed.
+        // Add one for the null terminator.
+        int length = snprintf(NULL, 0, "%s", toSend) + 1;
+        // Dynamically allocate memory for the output.
+        SET_NEW_ARRAY(aOut, length);
+        snprintf(aOut->value, length, "%s", toSend);
+    =}
+}

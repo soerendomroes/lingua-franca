@@ -1,0 +1,8 @@
+target TypeScript;
+reactor X {
+    output xOut: Buffer;
+    reaction(startup) -> xOut {=
+        xOut = Buffer.from("Hi from TypeScript!");
+        console.log("sending... ");
+    =}
+}

@@ -1,0 +1,10 @@
+target C;
+reactor Y {
+    input yIn:char*;
+    reaction(startup) {=
+        printf("startup print\n");
+    =}
+    reaction(yIn) {=
+        printf("Received: %s\n", yIn->value);
+    =}
+}
