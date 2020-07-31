@@ -66,6 +66,7 @@ import org.eclipse.xtext.resource.XtextResource
 import org.eclipse.xtext.nodemodel.impl.CompositeNode
 import org.eclipse.xtext.nodemodel.impl.HiddenLeafNode
 import org.eclipse.xtext.TerminalRule
+import org.eclipse.emf.ecore.util.EcoreUtil
 
 /**
  * A helper class for modifying and analyzing the AST.
@@ -79,6 +80,7 @@ class ASTUtils {
      * The Lingua Franca factory for creating new AST nodes.
      */
     public static val factory = LinguaFrancaFactory.eINSTANCE
+    
     
     /**
      * Find connections in the given resource that have a delay associated with them, 
@@ -400,8 +402,14 @@ class ASTUtils {
         GeneratorBase generator
     ) {
         val factory = LinguaFrancaFactory.eINSTANCE
-        var type = (connection.rightPort.variable as Port).type.copy
-        val action = factory.createAction
+        
+        // In a multilingual federate, the type of the left
+        // port will probably be different than the type of the
+        // right port.
+        var leftType = (connection.leftPort.variable as Port).type.copy
+        var rightType = (connection.rightPort.variable as Port).type.copy
+        val rightAction = factory.createAction
+        var Action leftAction 
         val triggerRef = factory.createVarRef
         val effectRef = factory.createVarRef
         val inRef = factory.createVarRef
@@ -410,42 +418,54 @@ class ASTUtils {
         val r1 = factory.createReaction
         val r2 = factory.createReaction
         
+        
         // These reactions do not require any dependency relationship
         // to other reactions in the container.
         generator.makeUnordered(r1)
         generator.makeUnordered(r2)
 
         // Name the newly created action; set its delay and type.
-        action.name = getUniqueIdentifier(parent, "networkMessage")
+        rightAction.name = getUniqueIdentifier(parent, "networkMessage")
         // Handle connection delay.
         if (connection.delay !== null) {
-            action.minDelay = factory.createValue
-            action.minDelay.time = factory.createTime
+            rightAction.minDelay = factory.createValue
+            rightAction.minDelay.time = factory.createTime
             if (connection.delay.time !== null) {
-                action.minDelay.time.interval = connection.delay.time.interval
-                action.minDelay.time.unit = connection.delay.time.unit
+                rightAction.minDelay.time.interval = connection.delay.time.interval
+                rightAction.minDelay.time.unit = connection.delay.time.unit
             } else {
-                action.minDelay.literal = connection.delay.literal
+                rightAction.minDelay.literal = connection.delay.literal
             }
         }
-        action.type = type
+        rightAction.type = rightType
         
         // The connection is 'physical' if it uses the ~> notation.
         if (connection.physical) {
-            action.origin = ActionOrigin.PHYSICAL
+            rightAction.origin = ActionOrigin.PHYSICAL
         } else {
-            action.origin = ActionOrigin.LOGICAL
+            rightAction.origin = ActionOrigin.LOGICAL
         }
+        
+        
+        // The leftAction is the same as the rightAction
+        // except it has the type of the left federate.
+        // This matters for multilingual federates
+        leftAction = EcoreUtil.copy(rightAction)
+        // A copy is necessary, because otherwise 
+        // (with a direct assignment) the following
+        // line would set action.type to null.
+        leftAction.type = EcoreUtil.copy(leftType)
+        
         
         // Record this action in the right federate.
         // The ID of the receiving port (rightPort) is the position
         // of the action in this list.
         val receivingPortID = rightFederate.networkMessageActions.length
-        rightFederate.networkMessageActions.add(action)
-
+        rightFederate.networkMessageActions.add(rightAction)
+        
         // Establish references to the action.
-        triggerRef.variable = action
-        effectRef.variable = action
+        triggerRef.variable = rightAction
+        effectRef.variable = leftAction
 
         // Establish references to the involved ports.
         inRef.container = connection.leftPort.container
@@ -454,38 +474,69 @@ class ASTUtils {
         outRef.variable = connection.rightPort.variable
 
         // Add the action to the reactor.
-        parent.actions.add(action)
+        var addLeft = ! generator.isForeignLanguage(leftFederate)
+        var addRight = ! generator.isForeignLanguage(rightFederate)
+        
+        // The type of an action with a foreign language type
+        // will be incompatible with generated code so only
+        // add it to the AST if the right federate isn't
+        // foreign language.
+        if (addLeft && addRight) {
+            // It doesn't matter which action is added to the parent
+            parent.actions.add(rightAction)
+        } else if (addLeft) {
+            parent.actions.add(leftAction)
+        } else if (addRight) {
+            parent.actions.add(rightAction)
+        } else {
+            // FIXME: Is it possible for both the left and the right action
+            // to be foreignLanguage? What should be done in this case?
+            // should this situation be prevented from happening elsewhere?
+            // Could it happen if you wrote a multilingual federate with
+            // three languages?
+            throw new RuntimeException("Neither the left nor the right"
+                + " federate have the target language. This case is not"
+                + " implemented."
+            )
+        }
 
-        // Configure the sending reaction.
-        r1.triggers.add(inRef)
-        r1.effects.add(effectRef)
-        r1.code = factory.createCode()
-        r1.code.body = generator.generateNetworkSenderBody(
-            inRef,
-            outRef,
-            receivingPortID,
-            leftFederate,
-            rightFederate,
-            action.inferredType
-        )
+        // Configure the sending reaction if it isn't part of
+        // a foreign language federate.
+        if (addLeft) {
+            r1.triggers.add(inRef)
+            r1.effects.add(effectRef)
+            r1.code = factory.createCode()
+            r1.code.body = generator.generateNetworkSenderBody(
+                inRef,
+                outRef,
+                receivingPortID,
+                leftFederate,
+                rightFederate,
+                leftAction.inferredType
+            )
+            // Add the reaction to the parent.
+            parent.reactions.add(r1)
+        }
 
-        // Configure the receiving reaction.
-        r2.triggers.add(triggerRef)
-        r2.effects.add(outRef)
-        r2.code = factory.createCode()
-        r2.code.body = generator.generateNetworkReceiverBody(
-            action,
-            inRef,
-            outRef,
-            receivingPortID,
-            leftFederate,
-            rightFederate,
-            action.inferredType
-        )
-
-        // Add the reactions to the parent.
-        parent.reactions.add(r1)
-        parent.reactions.add(r2)
+        // Configure the receiving reaction if it isn't part of
+        // a foreign language federate.
+        if (addRight) {
+            r2.triggers.add(triggerRef)
+            r2.effects.add(outRef)
+            r2.code = factory.createCode()
+            r2.code.body = generator.generateNetworkReceiverBody(
+                rightAction,
+                inRef,
+                outRef,
+                receivingPortID,
+                leftFederate,
+                rightFederate,
+                rightAction.inferredType
+            )
+    
+            // Add the reactions to the parent.
+            parent.reactions.add(r2) 
+        }
     }
     
     /**

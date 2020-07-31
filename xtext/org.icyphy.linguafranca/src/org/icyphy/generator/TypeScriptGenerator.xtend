@@ -53,6 +53,7 @@ import org.icyphy.linguaFranca.Variable
 import static extension org.icyphy.ASTUtils.*
 import org.icyphy.InferredType
 import org.icyphy.linguaFranca.Reaction
+import org.icyphy.linguaFranca.Model
 
 /** Generator for TypeScript target.
  *
@@ -96,20 +97,18 @@ class TypeScriptGenerator extends GeneratorBase {
     // custom command line arguments
     var customCLArgs = new HashSet<Parameter>()
 
-    /** Generate TypeScript code from the Lingua Franca model contained by the
-     *  specified resource. This is the main entry point for code
-     *  generation.
+    /**
+     *  Perform the main part of the work for generating
+     *  TypeScript code. See doGenerate and generateFromModel
      *  @param resource The resource containing the source code.
      *  @param fsa The file system access (used to write the result).
      *  @param context FIXME: Undocumented argument. No idea what this is.
      */
-    override void doGenerate(
-        Resource resource,
+    def typeScriptGeneration(
         IFileSystemAccess2 fsa,
-        IGeneratorContext context
-    ) {        
-        super.doGenerate(resource, fsa, context)
-           
+        IGeneratorContext context,
+        boolean generateRTI
+    ) {
         // Generate code for each reactor. 
         for (r : reactors) {
            r.generateReactor()
@@ -154,47 +153,51 @@ class TypeScriptGenerator extends GeneratorBase {
         // Every top-level reactor (contained
         // directly by the main reactor) is a federate
         for (federate : federates) {
+            // Federates is never empty, but
+            // it may contain a single federate with a
+            // null instantiation.
+            if (federate.instantiation !== null && !isForeignLanguage(federate)) {
+                // Only generate one output if there is no federation.
+                if (!federate.isSingleton) {
+                    federateFilename = baseFilename + '_' + federate.name
+                    // Clear out previously generated code,
+                    // but keep the reactor class definitions
+                    // and the preamble.
+                    code = new StringBuilder(commonCode)
+                } else {
+                    federateFilename = baseFilename
+                }
             
-            // Only generate one output if there is no federation.
-            if (!federate.isSingleton) {
-                federateFilename = baseFilename + '_' + federate.name
-                // Clear out previously generated code,
-                // but keep the reactor class definitions
-                // and the preamble.
-                code = new StringBuilder(commonCode)
-            } else {
-                federateFilename = baseFilename
+                // Build the instantiation tree if a main reactor is present.
+                if (this.mainDef !== null) {
+                    // Generate main instance, if there is one.
+                    generateReactorFederated(this.mainDef.reactorClass, federate)
+                    generateReactorInstance(this.mainDef)
+                    generateRuntimeStart(this.mainDef) 
+                }
+            
+                // Derive target filename from the .lf filename.
+                val tsFilename = federateFilename + ".ts";
+                val jsFilename = federateFilename + ".js";
+    
+                // Delete source previously produced by the LF compiler.
+                var file = new File(srcGenPath + File.separator + tsFilename)
+                if (file.exists) {
+                    file.delete
+                }
+    
+                // Delete .js previously output by TypeScript compiler
+                file = new File(outPath + File.separator + jsFilename)
+                if (file.exists) {
+                    file.delete
+                }
+    
+                // Write the generated code to the output file.
+                var fOut = new FileOutputStream(
+                    new File(srcGenPath + File.separator + tsFilename));
+                fOut.write(getCode().getBytes())
+                fOut.close()
             }
-        
-            // Build the instantiation tree if a main reactor is present.
-            if (this.mainDef !== null) {
-                // Generate main instance, if there is one.
-                generateReactorFederated(this.mainDef.reactorClass, federate)
-                generateReactorInstance(this.mainDef)
-                generateRuntimeStart(this.mainDef) 
-            }
-        
-            // Derive target filename from the .lf filename.
-            val tsFilename = federateFilename + ".ts";
-            val jsFilename = federateFilename + ".js";
-
-            // Delete source previously produced by the LF compiler.
-            var file = new File(srcGenPath + File.separator + tsFilename)
-            if (file.exists) {
-                file.delete
-            }
-
-            // Delete .js previously output by TypeScript compiler
-            file = new File(outPath + File.separator + jsFilename)
-            if (file.exists) {
-                file.delete
-            }
-
-            // Write the generated code to the output file.
-            var fOut = new FileOutputStream(
-                new File(srcGenPath + File.separator + tsFilename));
-            fOut.write(getCode().getBytes())
-            fOut.close()
         }
 
         // Copy the required library files into the src directory
@@ -291,7 +294,7 @@ class TypeScriptGenerator extends GeneratorBase {
         // Also, create two RTI C files, one that launches the federates
         // and one that does not.
         
-        if (federates.length > 1) {
+        if (federates.length > 1 && generateRTI) {
             
             // Create C output directories (if they don't exist)            
             dir = new File(cSrcGenPath)
@@ -313,6 +316,48 @@ class TypeScriptGenerator extends GeneratorBase {
             }
             compileRTI()
         }
+        
+    }
+
+    /** Generate TypeScript code from the Lingua Franca model contained by the
+     *  specified resource. This is the main entry point for code
+     *  generation.
+     *  @param resource The resource containing the source code.
+     *  @param fsa The file system access (used to write the result).
+     *  @param context FIXME: Undocumented argument. No idea what this is.
+     */
+    override void doGenerate(
+        Resource resource,
+        IFileSystemAccess2 fsa,
+        IGeneratorContext context
+    ) {        
+        super.doGenerate(resource, fsa, context)
+        var generateRTI = true
+        typeScriptGeneration(fsa, context, generateRTI)
+    }
+    
+    /**
+     * An alternative entry point for code generation for when
+     * the model object and reactors list are preprocessed to be
+     * different than the contents of resource.
+     * @param model The model object to be used in place of the model object
+     * in resource
+     * @param reactors The reactors list to be used for code generation
+     * in place of the reactor list in resource.
+     * @param resource The resource containing the source code.
+     * @param fsa The file system access (used to write the result).
+     * @param context FIXME: Undocumented argument. No idea what this is.
+     */
+    override void generateFromModel(
+        Model model,
+        List<Reactor> reactors,
+        Resource resource,
+        IFileSystemAccess2 fsa,
+        IGeneratorContext context
+    ) {        
+        super.generateFromModel(model, reactors, resource, fsa, context)
+        var generateRTI = false
+        typeScriptGeneration(fsa, context, generateRTI)
     }
     
     override generateDelayBody(Action action, VarRef port) {
@@ -331,6 +376,13 @@ class TypeScriptGenerator extends GeneratorBase {
     // // Code generators.
     
      def generateReactorFederated(Reactor reactor, FederateInstance federate) {
+        
+        // A foreign language reactor class is defined
+        // in a foreign language generator, not here
+        if (isForeignLanguage(reactor)) {
+            return
+        }
+        
         var reactorConstructor = new StringBuilder()
 
         pr("// =============== START reactor class " + reactor.name)
@@ -404,6 +456,8 @@ class TypeScriptGenerator extends GeneratorBase {
         // Next handle child reactors instantiations.
         // If the app isn't federated, instantiate all
         // the child reactors. If the app is federated
+        // only instantiate one child reactor (i.e. a 
+        // federate) per generated file. 
         
         var List<Instantiation> childReactors;
         if (!reactor.isFederated()) {
@@ -414,22 +468,24 @@ class TypeScriptGenerator extends GeneratorBase {
         }
         
         for (childReactor : childReactors ) {
-        pr(childReactor.getName() + ": " + childReactor.reactorClass.name + childReactor.typeParms.join('<', ',', '>', [it | it.toText]))
-        
-        var childReactorArguments = new StringJoiner(", ");
-        childReactorArguments.add("this")
-    
-        // Iterate through parameters in the order they appear in the
-        // reactor class, find the matching parameter assignments in
-        // the reactor instance, and write the corresponding parameter
-        // value as an argument for the TypeScript constructor
-        for (parameter : childReactor.reactorClass.parameters) {
-            childReactorArguments.add(parameter.getTargetInitializer(childReactor))
-        }
-        
-        pr(reactorConstructor, "this." + childReactor.getName()
-            + " = new " + childReactor.reactorClass.name + 
-            "(" + childReactorArguments + ")" )
+            if (!isForeignLanguage(childReactor)) {
+                pr(childReactor.getName() + ": " + childReactor.reactorClass.name + childReactor.typeParms.join('<', ',', '>', [it | it.toText]))
+                
+                var childReactorArguments = new StringJoiner(", ");
+                childReactorArguments.add("this")
+            
+                // Iterate through parameters in the order they appear in the
+                // reactor class, find the matching parameter assignments in
+                // the reactor instance, and write the corresponding parameter
+                // value as an argument for the TypeScript constructor
+                for (parameter : childReactor.reactorClass.parameters) {
+                    childReactorArguments.add(parameter.getTargetInitializer(childReactor))
+                }
+                
+                pr(reactorConstructor, "this." + childReactor.getName()
+                    + " = new " + childReactor.reactorClass.name + 
+                    "(" + childReactorArguments + ")" )  
+            }
         }
         
         // Next handle timers.
@@ -1000,51 +1056,53 @@ class TypeScriptGenerator extends GeneratorBase {
         // Extend the return type for commandLineArgs
         var clTypeExtension = new StringJoiner(", ")
         
-        for (parameter : mainReactor.parameters) {
-            var String customArgType = null;
-            var String customTypeLabel = null;
-            var paramType = parameter.targetType
-            if (paramType == "string") {
-                customCLArgs.add(parameter)
-                //clTypeExtension.add(parameter.name + " : string")
-                customArgType = "String";
-            } else if (paramType == "number") {
-                customCLArgs.add(parameter)
-                //clTypeExtension.add(parameter.name + " : number")
-                customArgType = "Number";
-            } else if (paramType == "boolean") {
-                customCLArgs.add(parameter)
-                //clTypeExtension.add(parameter.name + " : boolean")
-                customArgType = "booleanCLAType";
-                customTypeLabel = '[true | false]'
-            } else if (paramType == "TimeValue") {
-                customCLArgs.add(parameter)
-                //clTypeExtension.add(parameter.name + " : UnitBasedTimeValue | null")
-                customArgType = "unitBasedTimeValueCLAType"
-                customTypeLabel = "\'<duration> <units>\'"
-            }
-            // Otherwise don't add the parameter to customCLArgs
-            
-            
-            if (customArgType !== null) {
-                clTypeExtension.add(parameter.name + ": " + paramType)
-                if (customTypeLabel !== null) {
-                customArgs.add('''
-                    { name: '«parameter.name»',
-                        type: «customArgType»,
-                        typeLabel: "{underline «customTypeLabel»}",
-                        description: 'Custom argument. Refer to «sourceFile» for documentation.'
-                    }
-                    ''')
-                } else {
+        if (mainReactor !== null) {
+            for (parameter : mainReactor.parameters) {
+                var String customArgType = null;
+                var String customTypeLabel = null;
+                var paramType = parameter.targetType
+                if (paramType == "string") {
+                    customCLArgs.add(parameter)
+                    //clTypeExtension.add(parameter.name + " : string")
+                    customArgType = "String";
+                } else if (paramType == "number") {
+                    customCLArgs.add(parameter)
+                    //clTypeExtension.add(parameter.name + " : number")
+                    customArgType = "Number";
+                } else if (paramType == "boolean") {
+                    customCLArgs.add(parameter)
+                    //clTypeExtension.add(parameter.name + " : boolean")
+                    customArgType = "booleanCLAType";
+                    customTypeLabel = '[true | false]'
+                } else if (paramType == "TimeValue") {
+                    customCLArgs.add(parameter)
+                    //clTypeExtension.add(parameter.name + " : UnitBasedTimeValue | null")
+                    customArgType = "unitBasedTimeValueCLAType"
+                    customTypeLabel = "\'<duration> <units>\'"
+                }
+                // Otherwise don't add the parameter to customCLArgs
+                
+                
+                if (customArgType !== null) {
+                    clTypeExtension.add(parameter.name + ": " + paramType)
+                    if (customTypeLabel !== null) {
                     customArgs.add('''
                         { name: '«parameter.name»',
                             type: «customArgType»,
+                            typeLabel: "{underline «customTypeLabel»}",
                             description: 'Custom argument. Refer to «sourceFile» for documentation.'
                         }
-                    ''')  
-                }
-            }  
+                        ''')
+                    } else {
+                        customArgs.add('''
+                            { name: '«parameter.name»',
+                                type: «customArgType»,
+                                description: 'Custom argument. Refer to «sourceFile» for documentation.'
+                            }
+                        ''')  
+                    }
+                }  
+            }
         }
         
         var customArgsList = "[\n" + customArgs + "]"

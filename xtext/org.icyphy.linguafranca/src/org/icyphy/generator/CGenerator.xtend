@@ -66,6 +66,8 @@ import org.icyphy.linguaFranca.VarRef
 import org.icyphy.linguaFranca.Variable
 
 import static extension org.icyphy.ASTUtils.*
+import org.icyphy.linguaFranca.Model
+import java.util.List
 
 /** 
  * Generator for C target. This class generates C code definining each reactor
@@ -352,6 +354,31 @@ class CGenerator extends GeneratorBase {
     ////////////////////////////////////////////
     //// Public methods
 
+    /**
+     * An alternative entry point for code generation for when
+     * the model object and reactors list are preprocessed to be
+     * different than the contents of resource.
+     * @param model The model object to be used in place of the model object
+     * in resource
+     * @param reactors The reactors list to be used for code generation
+     * in place of the reactor list in resource.
+     * @param resource The resource containing the source code.
+     * @param fsa The file system access (used to write the result).
+     * @param context FIXME: Undocumented argument. No idea what this is.
+     */
+    override void generateFromModel(
+        Model model,
+        List<Reactor> reactors,
+        Resource resource,
+        IFileSystemAccess2 fsa,
+        IGeneratorContext context
+    ) {        
+        super.generateFromModel(model, reactors, resource, fsa, context)
+        var generateRTI = false
+        cGeneration(fsa, context, generateRTI)
+    }
+
+
     /** Generate C code from the Lingua Franca model contained by the
      *  specified resource. This is the main entry point for code
      *  generation.
@@ -359,12 +386,28 @@ class CGenerator extends GeneratorBase {
      *  @param fsa The file system access (used to write the result).
      *  @param context FIXME: Undocumented argument. No idea what this is.
      */
-    override void doGenerate(Resource resource, IFileSystemAccess2 fsa,
-            IGeneratorContext context) {
-        
+    override void doGenerate(Resource resource,
+        IFileSystemAccess2 fsa,
+        IGeneratorContext context
+    ) {
         // The following generates code needed by all the reactors.
         super.doGenerate(resource, fsa, context)
-        
+        var generateRTI = true
+        cGeneration(fsa, context, generateRTI)
+    }
+    
+    
+    /**
+     *  Perform the main part of the work for generating
+     *  C code. See doGenerate and generateFromModel
+     *  @param resource The resource containing the source code.
+     *  @param fsa The file system access (used to write the result).
+     *  @param context FIXME: Undocumented argument. No idea what this is.
+     */
+    def void cGeneration(IFileSystemAccess2 fsa,
+            IGeneratorContext context,
+            boolean generateRTI
+    ) {
         // Generate code for each reactor. 
         for (r : reactors) {
             r.generateReactorFederated(null)
@@ -391,8 +434,10 @@ class CGenerator extends GeneratorBase {
         // and one that does not.
         if (federates.length > 1) {
             files.addAll("rti.c", "rti.h", "federate.c")
-            createFederateRTI()
-            createLauncher()
+            if (generateRTI) {
+                createFederateRTI()
+                createLauncher()                
+            }
         }
         
         for (file : files) {
@@ -411,255 +456,266 @@ class CGenerator extends GeneratorBase {
         var commonCode = code;
         var commonStartTimers = startTimers;
         for (federate : federates) {
-            deferredInitialize.clear()
-            shutdownActionInstances.clear()
-            startTimeStepIsPresentCount = 0
-            startTimeStepTokens = 0
+            // Federates is never empty, but
+            // it may contain a single federate with a
+            // null instantiation.
             
-            // Only generate one output if there is no federation.
-            if (!federate.isSingleton) {
-                filename = baseFilename + '_' + federate.name
-                // Clear out previously generated code.
-                code = new StringBuilder(commonCode)
-                initializeTriggerObjects = new StringBuilder()
-                initializeTriggerObjectsEnd = new StringBuilder()
-                
-                startTimeStep = new StringBuilder()
-                startTimers = new StringBuilder(commonStartTimers)
-                // This should go first in the start_timers function.
-                pr(startTimers, 'synchronize_with_other_federates('
-                    + federate.id
-                    + ', "'
-                    + federationRTIProperties.get('host') 
-                    + '", ' + federationRTIProperties.get('port')
-                    + ");"
-                )
-            }
-        
-            // Build the instantiation tree if a main reactor is present.
-            if (this.mainDef !== null) {
-                generateReactorFederated(this.mainDef.reactorClass, federate)
-                if (this.main === null) {
-                    // Recursively build instances. This is done once because
-                    // it is the same for all federates.
-                    this.main = new ReactorInstance(mainDef, null, this) 
-                }   
-            }
-        
-            // Derive target filename from the .lf filename.
-            val cFilename = getTargetFileName(filename);
-
-            // Delete source previously produced by the LF compiler.
-            var file = new File(srcGenPath + File.separator + cFilename)
-            if (file.exists) {
-                file.delete
-            }
-
-            // Delete binary previously produced by the C compiler.
-            file = new File(outPath + File.separator + filename)
-            if (file.exists) {
-                file.delete
-            }
-
-            // Generate main instance, if there is one.
-            // Note that any main reactors in imported files are ignored.        
-            if (this.main !== null) {
-                generateReactorInstance(this.main, federate)
-
-                // Generate function to set default command-line options.
-                // A literal array needs to be given outside any function definition,
-                // so start with that.
-                if (runCommand.length > 0) {
-                    pr('char* __default_argv[] = {"' + runCommand.join('", "') + '"};')
+            // Generate singletons and C language
+            // federates. It is assumed a singleton
+            // federate (with a null instantiation)
+            // is always C language.
+            if (federate.isSingleton ||
+                (federate.instantiation !== null 
+                && !isForeignLanguage(federate))
+            ) {
+            
+                // Only generate one output if there is no federation.
+                if (!federate.isSingleton) {
+                    filename = baseFilename + '_' + federate.name
+                    // Clear out previously generated code.
+                    code = new StringBuilder(commonCode)
+                    initializeTriggerObjects = new StringBuilder()
+                    initializeTriggerObjectsEnd = new StringBuilder()
+                    
+                    startTimeStep = new StringBuilder()
+                    startTimers = new StringBuilder(commonStartTimers)
+                    // This should go first in the start_timers function.
+                    pr(startTimers, 'synchronize_with_other_federates('
+                        + federate.id
+                        + ', "'
+                        + federationRTIProperties.get('host') 
+                        + '", ' + federationRTIProperties.get('port')
+                        + ");"
+                    )
                 }
-                pr('void __set_default_command_line_options() {\n')
-                indent()
-                if (runCommand.length > 0) {
-                    pr('default_argc = ' + runCommand.length + ';')
-                    pr('default_argv = __default_argv;')
+            
+                deferredInitialize.clear()
+                shutdownActionInstances.clear()
+                startTimeStepIsPresentCount = 0
+                startTimeStepTokens = 0
+            
+                // Build the instantiation tree if a main reactor is present.
+                if (this.mainDef !== null) {
+                    generateReactorFederated(this.mainDef.reactorClass, federate)
+                    if (this.main === null) {
+                        // Recursively build instances. This is done once because
+                        // it is the same for all federates.
+                        this.main = new ReactorInstance(mainDef, null, this) 
+                    }   
                 }
-                unindent()
-                pr('}\n')
-                
-                // If there are timers, create a table of timers to be initialized.
-                if (startTimersCount > 0) {
-                    pr('''
-                        // Array of pointers to timer triggers to start the timers in __start_timers().
-                        trigger_t* __timer_triggers[«startTimersCount»];
-                    ''')
+            
+                // Derive target filename from the .lf filename.
+                val cFilename = getTargetFileName(filename);
+    
+                // Delete source previously produced by the LF compiler.
+                var file = new File(srcGenPath + File.separator + cFilename)
+                if (file.exists) {
+                    file.delete
                 }
-                pr('''
-                    int __timer_triggers_size = «startTimersCount»;
-                ''')
-                if (shutdownActionInstances.size > 0) {
-                    pr('''
-                        // Array of pointers to shutdown triggers.
-                        trigger_t* __shutdown_triggers[«shutdownActionInstances.size»];
-                    ''')
-                } else {
-                    pr('''
-                        // Array of pointers to shutdown triggers.
-                        trigger_t** __shutdown_triggers = NULL;
-                    ''')
+    
+                // Delete binary previously produced by the C compiler.
+                file = new File(outPath + File.separator + filename)
+                if (file.exists) {
+                    file.delete
                 }
-                pr('''
-                    int __shutdown_triggers_size = «shutdownActionInstances.size»;
-                ''')
-                
-                // Generate function to return a pointer to the action trigger_t
-                // that handles incoming network messages destined to the specified
-                // port. This will only be used if there are federates.
-                if (federate.networkMessageActions.size > 0) {
-                    pr('''trigger_t* __action_table[«federate.networkMessageActions.size»];''')
-                }
-                pr('trigger_t* __action_for_port(int port_id) {\n')
-                indent()
-                if (federate.networkMessageActions.size > 0) {
-                    // Create a static array of trigger_t pointers.
-                    // networkMessageActions is a list of Actions, but we
-                    // need a list of trigger struct names for ActionInstances.
-                    // There should be exactly one ActionInstance in the
-                    // main reactor for each Action.
-                    val triggers = new LinkedList<String>()
-                    for (action : federate.networkMessageActions) {
-                        // Find the corresponding ActionInstance.
-                        val actionInstance = main.getActionInstance(action)
-                        triggers.add(triggerStructName(actionInstance))
+    
+                // Generate main instance, if there is one.
+                // Note that any main reactors in imported files are ignored.        
+                if (this.main !== null) {
+                    generateReactorInstance(this.main, federate)
+    
+                    // Generate function to set default command-line options.
+                    // A literal array needs to be given outside any function definition,
+                    // so start with that.
+                    if (runCommand.length > 0) {
+                        pr('char* __default_argv[] = {"' + runCommand.join('", "') + '"};')
                     }
-                    var actionTableCount = 0
-                    for (trigger : triggers) {
-                        pr(initializeTriggerObjects, '''
-                            __action_table[«actionTableCount++»] = &«trigger»;
+                    pr('void __set_default_command_line_options() {\n')
+                    indent()
+                    if (runCommand.length > 0) {
+                        pr('default_argc = ' + runCommand.length + ';')
+                        pr('default_argv = __default_argv;')
+                    }
+                    unindent()
+                    pr('}\n')
+                    
+                    // If there are timers, create a table of timers to be initialized.
+                    if (startTimersCount > 0) {
+                        pr('''
+                            // Array of pointers to timer triggers to start the timers in __start_timers().
+                            trigger_t* __timer_triggers[«startTimersCount»];
                         ''')
                     }
                     pr('''
-                        if (port_id < «federate.networkMessageActions.size») {
-                            return __action_table[port_id];
-                        } else {
-                            return NULL;
+                        int __timer_triggers_size = «startTimersCount»;
+                    ''')
+                    if (shutdownActionInstances.size > 0) {
+                        pr('''
+                            // Array of pointers to shutdown triggers.
+                            trigger_t* __shutdown_triggers[«shutdownActionInstances.size»];
+                        ''')
+                    } else {
+                        pr('''
+                            // Array of pointers to shutdown triggers.
+                            trigger_t** __shutdown_triggers = NULL;
+                        ''')
+                    }
+                    pr('''
+                        int __shutdown_triggers_size = «shutdownActionInstances.size»;
+                    ''')
+                    
+                    // Generate function to return a pointer to the action trigger_t
+                    // that handles incoming network messages destined to the specified
+                    // port. This will only be used if there are federates.
+                    if (federate.networkMessageActions.size > 0) {
+                        pr('''trigger_t* __action_table[«federate.networkMessageActions.size»];''')
+                    }
+                    pr('trigger_t* __action_for_port(int port_id) {\n')
+                    indent()
+                    if (federate.networkMessageActions.size > 0) {
+                        // Create a static array of trigger_t pointers.
+                        // networkMessageActions is a list of Actions, but we
+                        // need a list of trigger struct names for ActionInstances.
+                        // There should be exactly one ActionInstance in the
+                        // main reactor for each Action.
+                        val triggers = new LinkedList<String>()
+                        for (action : federate.networkMessageActions) {
+                            // Find the corresponding ActionInstance.
+                            val actionInstance = main.getActionInstance(action)
+                            triggers.add(triggerStructName(actionInstance))
                         }
-                    ''')
-                } else {
-                    pr('return NULL;')
-                }
-                unindent()
-                pr('}\n')
-                
-                // Generate function to initialize the trigger objects for all reactors.
-                pr('void __initialize_trigger_objects() {\n')
-                indent()
-                
-                // Create the table used to decrement reference counts between time steps.
-                if (startTimeStepTokens > 0) {
-                    // Allocate the initial (before mutations) array of pointers to tokens.
-                    pr('''
-                        __tokens_with_ref_count_size = «startTimeStepTokens»;
-                        __tokens_with_ref_count = (token_present_t*)malloc(«startTimeStepTokens» * sizeof(token_present_t));
-                    ''')
-                }
-                // Create the table to initialize is_present fields to false between time steps.
-                if (startTimeStepIsPresentCount > 0) {
-                    // Allocate the initial (before mutations) array of pointers to _is_present fields.
-                    pr('''
-                        // Create the array that will contain pointers to is_present fields to reset on each step.
-                        __is_present_fields_size = «startTimeStepIsPresentCount»;
-                        __is_present_fields = (bool**)malloc(«startTimeStepIsPresentCount» * sizeof(bool*));
-                    ''')
-                }
-                pr(initializeTriggerObjects.toString)
-                pr('// Populate arrays of trigger pointers.')
-                pr(initializeTriggerObjectsEnd.toString)
-                doDeferredInitialize(federate)
-                
-                // Put the code here to set up the tables that drive resetting is_present and
-                // decrementing reference counts between time steps. This code has to appear
-                // in __initialize_trigger_objects() after the code that makes connections
-                // between inputs and outputs.
-                pr(startTimeStep.toString)
-                
-                setReactionPriorities(main, federate)
-                if (federates.length > 1) {
-                    if (federate.dependsOn.size > 0) {
-                        pr('__fed_has_upstream  = true;')
-                    }
-                    if (federate.sendsTo.size > 0) {
-                        pr('__fed_has_downstream = true;')
-                    }
-                }
-                unindent()
-                pr('}\n')
-
-                // Generate function to start timers for all reactors.
-                pr("void __start_timers() {")
-                indent()
-                pr(startTimers.toString)
-                if (startTimersCount > 0) {
-                    pr('''
-                       for (int i = 0; i < __timer_triggers_size; i++) {
-                           __schedule(__timer_triggers[i], 0LL, NULL);
-                       }
-                    ''')
-                }
-                unindent()
-                pr("}")
-
-                // Generate a function that will either do nothing
-                // (if there is only one federate) or, if there are
-                // downstream federates, will notify the RTI
-                // that the specified logical time is complete.
-                pr('''
-                    void logical_time_complete(instant_t time) {
-                        «IF federates.length > 1»
-                            __logical_time_complete(time);
-                        «ENDIF»
-                    }
-                ''')
-                
-                // Generate a function that will either just return immediately
-                // if there is only one federate or will notify the RTI,
-                // if necessary, of the next event time.
-                pr('''
-                    instant_t next_event_time(instant_t time) {
-                        «IF federates.length > 1»
-                            return __next_event_time(time);
-                        «ELSE»
-                            return time;
-                        «ENDIF»
-                    }
-                ''')
-                
-                // Generate function to schedule shutdown actions if any
-                // reactors have reactions to shutdown.
-                pr('''
-                    bool __wrapup() {
-                        __start_time_step();  // To free memory allocated for actions.
-                        for (int i = 0; i < __shutdown_triggers_size; i++) {
-                            __schedule(__shutdown_triggers[i], 0LL, NULL);
+                        var actionTableCount = 0
+                        for (trigger : triggers) {
+                            pr(initializeTriggerObjects, '''
+                                __action_table[«actionTableCount++»] = &«trigger»;
+                            ''')
                         }
-                        // Return true if there are shutdown actions.
-                        return (__shutdown_triggers_size > 0);
-                    }
-                ''')
-                
-                // Generate the termination function.
-                // If there are federates, this will resign from the federation.
-                if (federates.length > 1) {
-                    pr('''
-                        void __termination() {
-                            unsigned char message_marker = RESIGN;
-                            if (write(rti_socket, &message_marker, 1) != 1) {
-                                fprintf(stderr, "WARNING: Failed to send RESIGN message to the RTI.\n");
+                        pr('''
+                            if (port_id < «federate.networkMessageActions.size») {
+                                return __action_table[port_id];
+                            } else {
+                                return NULL;
                             }
+                        ''')
+                    } else {
+                        pr('return NULL;')
+                    }
+                    unindent()
+                    pr('}\n')
+                    
+                    // Generate function to initialize the trigger objects for all reactors.
+                    pr('void __initialize_trigger_objects() {\n')
+                    indent()
+                    
+                    // Create the table used to decrement reference counts between time steps.
+                    if (startTimeStepTokens > 0) {
+                        // Allocate the initial (before mutations) array of pointers to tokens.
+                        pr('''
+                            __tokens_with_ref_count_size = «startTimeStepTokens»;
+                            __tokens_with_ref_count = (token_present_t*)malloc(«startTimeStepTokens» * sizeof(token_present_t));
+                        ''')
+                    }
+                    // Create the table to initialize is_present fields to false between time steps.
+                    if (startTimeStepIsPresentCount > 0) {
+                        // Allocate the initial (before mutations) array of pointers to _is_present fields.
+                        pr('''
+                            // Create the array that will contain pointers to is_present fields to reset on each step.
+                            __is_present_fields_size = «startTimeStepIsPresentCount»;
+                            __is_present_fields = (bool**)malloc(«startTimeStepIsPresentCount» * sizeof(bool*));
+                        ''')
+                    }
+                    pr(initializeTriggerObjects.toString)
+                    pr('// Populate arrays of trigger pointers.')
+                    pr(initializeTriggerObjectsEnd.toString)
+                    doDeferredInitialize(federate)
+                    
+                    // Put the code here to set up the tables that drive resetting is_present and
+                    // decrementing reference counts between time steps. This code has to appear
+                    // in __initialize_trigger_objects() after the code that makes connections
+                    // between inputs and outputs.
+                    pr(startTimeStep.toString)
+                    
+                    setReactionPriorities(main, federate)
+                    if (federates.length > 1) {
+                        if (federate.dependsOn.size > 0) {
+                            pr('__fed_has_upstream  = true;')
+                        }
+                        if (federate.sendsTo.size > 0) {
+                            pr('__fed_has_downstream = true;')
+                        }
+                    }
+                    unindent()
+                    pr('}\n')
+    
+                    // Generate function to start timers for all reactors.
+                    pr("void __start_timers() {")
+                    indent()
+                    pr(startTimers.toString)
+                    if (startTimersCount > 0) {
+                        pr('''
+                           for (int i = 0; i < __timer_triggers_size; i++) {
+                               __schedule(__timer_triggers[i], 0LL, NULL);
+                           }
+                        ''')
+                    }
+                    unindent()
+                    pr("}")
+    
+                    // Generate a function that will either do nothing
+                    // (if there is only one federate) or, if there are
+                    // downstream federates, will notify the RTI
+                    // that the specified logical time is complete.
+                    pr('''
+                        void logical_time_complete(instant_t time) {
+                            «IF federates.length > 1»
+                                __logical_time_complete(time);
+                            «ENDIF»
                         }
                     ''')
-                } else {
-                    pr("void __termination() {}");
+                    
+                    // Generate a function that will either just return immediately
+                    // if there is only one federate or will notify the RTI,
+                    // if necessary, of the next event time.
+                    pr('''
+                        instant_t next_event_time(instant_t time) {
+                            «IF federates.length > 1»
+                                return __next_event_time(time);
+                            «ELSE»
+                                return time;
+                            «ENDIF»
+                        }
+                    ''')
+                    
+                    // Generate function to schedule shutdown actions if any
+                    // reactors have reactions to shutdown.
+                    pr('''
+                        bool __wrapup() {
+                            __start_time_step();  // To free memory allocated for actions.
+                            for (int i = 0; i < __shutdown_triggers_size; i++) {
+                                __schedule(__shutdown_triggers[i], 0LL, NULL);
+                            }
+                            // Return true if there are shutdown actions.
+                            return (__shutdown_triggers_size > 0);
+                        }
+                    ''')
+                    
+                    // Generate the termination function.
+                    // If there are federates, this will resign from the federation.
+                    if (federates.length > 1) {
+                        pr('''
+                            void __termination() {
+                                unsigned char message_marker = RESIGN;
+                                if (write(rti_socket, &message_marker, 1) != 1) {
+                                    fprintf(stderr, "WARNING: Failed to send RESIGN message to the RTI.\n");
+                                }
+                            }
+                        ''')
+                    } else {
+                        pr("void __termination() {}");
+                    }
                 }
+                writeSourceCodeToFile(getCode().getBytes(), srcGenPath + File.separator + cFilename)
             }
-
-			
-            writeSourceCodeToFile(getCode().getBytes(), srcGenPath + File.separator + cFilename)
-            
         }
         // Restore the base filename.
         filename = baseFilename
@@ -668,14 +724,13 @@ class CGenerator extends GeneratorBase {
         refreshProject()
         
         if (!targetNoCompile) {
-            compileCode()
+            compileCode(generateRTI)
         } else {
             println("Exiting before invoking target compiler.")
         }
         
         
         writeCleanCode(filename)
-        
     }
     
     /** Overwrite the generated code after compile with a
@@ -686,22 +741,23 @@ class CGenerator extends GeneratorBase {
         var srcGenPath = directory + File.separator + "src-gen"
     	//Cleanup the code so that it is more readable
         for (federate : federates) {
+            if (federate.instantiation !== null && !isForeignLanguage(federate)) {
                 
-            // Only clean one file if there is no federation.
-            if (!federate.isSingleton) {                
-                filename = baseFilename + '_' + federate.name               
+                // Only clean one file if there is no federation.
+                if (!federate.isSingleton) {                
+                    filename = baseFilename + '_' + federate.name               
+                }
+                
+                // Derive target filename from the .lf filename.
+                val cFilename = filename + ".c";
+                
+                
+                // Write a clean version of the code to the output file
+                var fOut = new FileOutputStream(
+                new File(srcGenPath + File.separator + cFilename), false);
+                fOut.write(getReadableCode().getBytes())
+                fOut.close()
             }
-            
-            // Derive target filename from the .lf filename.
-            val cFilename = filename + ".c";
-            
-            
-            // Write a clean version of the code to the output file
-            var fOut = new FileOutputStream(
-            new File(srcGenPath + File.separator + cFilename), false);
-            fOut.write(getReadableCode().getBytes())
-            fOut.close()
-            
         }
     	
     }
@@ -1064,6 +1120,12 @@ class CGenerator extends GeneratorBase {
      * @param federate A federate name, or null to unconditionally generate.
      */
     def generateReactorFederated(Reactor reactor, FederateInstance federate) {
+
+        // A foreign language reactor class is defined
+        // in a foreign language generator, not here
+        if (reactor === null || isForeignLanguage(reactor)) {
+            return
+        }
 
         // Create Timer and Action for startup and shutdown, if they occur.
         handleStartupAndShutdown(reactor)

@@ -67,6 +67,9 @@ class LinguaFrancaGenerator extends AbstractGenerator {
                 case TS: {
                     generator = new TypeScriptGenerator()
                 }
+                case Multi: {
+                    generator = new MultipleGenerator()
+                }
 			}
 		}
 		generator.doGenerate(resource, fsa, context)

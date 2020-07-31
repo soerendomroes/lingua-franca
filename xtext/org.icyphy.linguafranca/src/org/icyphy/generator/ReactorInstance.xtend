@@ -114,13 +114,16 @@ class ReactorInstance extends NamedInstance<Instantiation> {
         }
 
         // Instantiate children for this reactor instance
+        // if they are not foreign language
         for (child : definition.reactorClass.allInstantiations) {
-            var childInstance = new ReactorInstance(child, this, generator)
-            this.children.add(childInstance)
-            // If the child is a bank of instances, add all the bank instances.
-            // These must be added after the bank itself.
-            if (childInstance.bankMembers !== null) {
-                this.children.addAll(childInstance.bankMembers)
+            if (!generator.isForeignLanguage(child)) {
+                var childInstance = new ReactorInstance(child, this, generator)
+                this.children.add(childInstance)
+                // If the child is a bank of instances, add all the bank instances.
+                // These must be added after the bank itself.
+                if (childInstance.bankMembers !== null) {
+                    this.children.addAll(childInstance.bankMembers)
+                }
             }
         }
 

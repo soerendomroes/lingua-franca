@@ -26,6 +26,8 @@ THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 package org.icyphy;
 
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.LinkedList;
 import java.util.List;
 
 /**
@@ -38,273 +40,16 @@ import java.util.List;
  * 
  * @author{Marten Lohstroh <marten@berkeley.edu>}
  */
-public enum Targets {
-    C("C", true, Arrays.asList(
-                // List via: https://en.cppreference.com/w/c/keyword
-                "auto",
-                "break",
-                "case",
-                "char",
-                "const",
-                "continue",
-                "default",
-                "do",
-                "double",
-                "else",
-                "enum",
-                "extern",
-                "float",
-                "for",
-                "goto",
-                "if",
-                "inline", // (since C99)
-                "int",
-                "long",
-                "register",
-                "restrict", // (since C99)
-                "return",
-                "short",
-                "signed",
-                "sizeof",
-                "static",
-                "struct",
-                "switch",
-                "typedef",
-                "union",
-                "unsigned",
-                "void",
-                "volatile",
-                "while",
-                "_Alignas", // (since C11)
-                "_Alignof", // (since C11)
-                "_Atomic", // (since C11)
-                "_Bool", // (since C99)
-                "_Complex", // (since C99)
-                "_Generic", // (since C11)
-                "_Imaginary", // (since C99)
-                "_Noreturn", // (since C11)
-                "_Static_assert", // (since C11)
-                "_Thread_local" // (since C11)
-                )
-    ), 
-    CCpp("CCpp", true, Arrays.asList(
-            // List via: https://en.cppreference.com/w/c/keyword
-            "auto",
-            "break",
-            "case",
-            "char",
-            "const",
-            "continue",
-            "default",
-            "do",
-            "double",
-            "else",
-            "enum",
-            "extern",
-            "float",
-            "for",
-            "goto",
-            "if",
-            "inline", // (since C99)
-            "int",
-            "long",
-            "register",
-            "restrict", // (since C99)
-            "return",
-            "short",
-            "signed",
-            "sizeof",
-            "static",
-            "struct",
-            "switch",
-            "typedef",
-            "union",
-            "unsigned",
-            "void",
-            "volatile",
-            "while",
-            "_Alignas", // (since C11)
-            "_Alignof", // (since C11)
-            "_Atomic", // (since C11)
-            "_Bool", // (since C99)
-            "_Complex", // (since C99)
-            "_Generic", // (since C11)
-            "_Imaginary", // (since C99)
-            "_Noreturn", // (since C11)
-            "_Static_assert", // (since C11)
-            "_Thread_local" // (since C11)
-            )
-    ), 
-    CPP("Cpp", true, Arrays.asList(
-                // List via: https://en.cppreference.com/w/cpp/keyword
-                "alignas", // (since C++11)
-                "alignof", // (since C++11)
-                "and",
-                "and_eq",
-                "asm",
-                "atomic_cancel", // (TM TS)
-                "atomic_commit", // (TM TS)
-                "atomic_noexcept", // (TM TS)
-                "auto(1)",
-                "bitand",
-                "bitor",
-                "bool",
-                "break",
-                "case",
-                "catch",
-                "char",
-                "char8_t", // (since C++20)
-                "char16_t", // (since C++11)
-                "char32_t", // (since C++11)
-                "class(1)",
-                "compl",
-                "concept", // (since C++20)
-                "const",
-                "consteval", // (since C++20)
-                "constexpr", // (since C++11)
-                "constinit", // (since C++20)
-                "const_cast",
-                "continue",
-                "co_await", // (since C++20)
-                "co_return", // (since C++20)
-                "co_yield", // (since C++20)
-                "decltype", // (since C++11)
-                "default(1)",
-                "delete(1)",
-                "do",
-                "double",
-                "dynamic_cast",
-                "else",
-                "enum",
-                "explicit",
-                "export(1)(3)",
-                "extern(1)",
-                "false",
-                "float",
-                "for",
-                "friend",
-                "goto",
-                "if",
-                "inline(1)",
-                "int",
-                "long",
-                "mutable(1)",
-                "namespace",
-                "new",
-                "noexcept", // (since C++11)
-                "not",
-                "not_eq",
-                "nullptr", // (since C++11)
-                "operator",
-                "or",
-                "or_eq",
-                "private",
-                "protected",
-                "public",
-                "reflexpr", // (reflection TS)
-                "register(2)",
-                "reinterpret_cast",
-                "requires", // (since C++20)
-                "return",
-                "short",
-                "signed",
-                "sizeof(1)",
-                "static",
-                "static_assert", // (since C++11)
-                "static_cast",
-                "struct(1)",
-                "switch",
-                "synchronized", // (TM TS)
-                "template",
-                "this",
-                "thread_local", // (since C++11)
-                "throw",
-                "true",
-                "try",
-                "typedef",
-                "typeid",
-                "typename",
-                "union",
-                "unsigned",
-                "using(1)",
-                "virtual",
-                "void",
-                "volatile",
-                "wchar_t",
-                "while",
-                "xor",
-                "xor_eq"
-                )
-    ),
-    TS("TypeScript", false, Arrays.asList(
-                // List via: https://github.com/Microsoft/TypeScript/issues/2536 
-                // Reserved words
-                "break",
-                "case",
-                "catch",
-                "class",
-                "const",
-                "continue",
-                "debugger",
-                "default",
-                "delete",
-                "do",
-                "else",
-                "enum",
-                "export",
-                "extends",
-                "false",
-                "finally",
-                "for",
-                "function",
-                "if",
-                "import",
-                "in",
-                "instanceof",
-                "new",
-                "null",
-                "return",
-                "super",
-                "switch",
-                "this",
-                "throw",
-                "true",
-                "try",
-                "typeof",
-                "var",
-                "void",
-                "while",
-                "with",
-                
-                //Strict Mode Reserved Words
-                "as",
-                "implements",
-                "interface",
-                "let",
-                "package",
-                "private",
-                "protected",
-                "public",
-                "static",
-                "yield",
-                
-                // Contextual Keywords
-                "any",
-                "boolean",
-                "constructor",
-                "declare",
-                "get",
-                "module",
-                "require",
-                "number",
-                "set",
-                "string",
-                "symbol",
-                "type",
-                "from",
-                "of"
-                )
-    );
+public enum Targets {  
+    
+    C("C", true, Common.CReservedList), 
+    CCpp("CCpp", true, Common.CReservedList), 
+    CPP("Cpp", true, Common.CPPReservedList),
+    TS("TypeScript", false, Common.TSReservedList),
+    
+    // FIXME: setting requiresTypes to false (second arg) to prevent 
+    // validation errors for multiple target. Revisit this.
+    Multi("Multiple", false, Common.getAllReserved());
     
     /**
      * String representation of this target.
@@ -511,6 +256,244 @@ public enum Targets {
     @Override
     public String toString() {
         return this.name;
+    }
+    
+    /**
+     * Private class used to prevent code duplication for common fields.  
+     * @author Matt Weber
+     */
+    private static class Common {
+        private static List<String> CReservedList = Arrays.asList(
+                // List via: https://en.cppreference.com/w/c/keyword
+                "auto",
+                "break",
+                "case",
+                "char",
+                "const",
+                "continue",
+                "default",
+                "do",
+                "double",
+                "else",
+                "enum",
+                "extern",
+                "float",
+                "for",
+                "goto",
+                "if",
+                "inline", // (since C99)
+                "int",
+                "long",
+                "register",
+                "restrict", // (since C99)
+                "return",
+                "short",
+                "signed",
+                "sizeof",
+                "static",
+                "struct",
+                "switch",
+                "typedef",
+                "union",
+                "unsigned",
+                "void",
+                "volatile",
+                "while",
+                "_Alignas", // (since C11)
+                "_Alignof", // (since C11)
+                "_Atomic", // (since C11)
+                "_Bool", // (since C99)
+                "_Complex", // (since C99)
+                "_Generic", // (since C11)
+                "_Imaginary", // (since C99)
+                "_Noreturn", // (since C11)
+                "_Static_assert", // (since C11)
+                "_Thread_local" // (since C11)
+                );
+        
+        private static List<String> CPPReservedList = Arrays.asList(
+                // List via: https://en.cppreference.com/w/cpp/keyword
+                "alignas", // (since C++11)
+                "alignof", // (since C++11)
+                "and",
+                "and_eq",
+                "asm",
+                "atomic_cancel", // (TM TS)
+                "atomic_commit", // (TM TS)
+                "atomic_noexcept", // (TM TS)
+                "auto(1)",
+                "bitand",
+                "bitor",
+                "bool",
+                "break",
+                "case",
+                "catch",
+                "char",
+                "char8_t", // (since C++20)
+                "char16_t", // (since C++11)
+                "char32_t", // (since C++11)
+                "class(1)",
+                "compl",
+                "concept", // (since C++20)
+                "const",
+                "consteval", // (since C++20)
+                "constexpr", // (since C++11)
+                "constinit", // (since C++20)
+                "const_cast",
+                "continue",
+                "co_await", // (since C++20)
+                "co_return", // (since C++20)
+                "co_yield", // (since C++20)
+                "decltype", // (since C++11)
+                "default(1)",
+                "delete(1)",
+                "do",
+                "double",
+                "dynamic_cast",
+                "else",
+                "enum",
+                "explicit",
+                "export(1)(3)",
+                "extern(1)",
+                "false",
+                "float",
+                "for",
+                "friend",
+                "goto",
+                "if",
+                "inline(1)",
+                "int",
+                "long",
+                "mutable(1)",
+                "namespace",
+                "new",
+                "noexcept", // (since C++11)
+                "not",
+                "not_eq",
+                "nullptr", // (since C++11)
+                "operator",
+                "or",
+                "or_eq",
+                "private",
+                "protected",
+                "public",
+                "reflexpr", // (reflection TS)
+                "register(2)",
+                "reinterpret_cast",
+                "requires", // (since C++20)
+                "return",
+                "short",
+                "signed",
+                "sizeof(1)",
+                "static",
+                "static_assert", // (since C++11)
+                "static_cast",
+                "struct(1)",
+                "switch",
+                "synchronized", // (TM TS)
+                "template",
+                "this",
+                "thread_local", // (since C++11)
+                "throw",
+                "true",
+                "try",
+                "typedef",
+                "typeid",
+                "typename",
+                "union",
+                "unsigned",
+                "using(1)",
+                "virtual",
+                "void",
+                "volatile",
+                "wchar_t",
+                "while",
+                "xor",
+                "xor_eq"
+                );
+        
+        private static List<String> TSReservedList = Arrays.asList(
+                // List via: https://github.com/Microsoft/TypeScript/issues/2536 
+                // Reserved words
+                "break",
+                "case",
+                "catch",
+                "class",
+                "const",
+                "continue",
+                "debugger",
+                "default",
+                "delete",
+                "do",
+                "else",
+                "enum",
+                "export",
+                "extends",
+                "false",
+                "finally",
+                "for",
+                "function",
+                "if",
+                "import",
+                "in",
+                "instanceof",
+                "new",
+                "null",
+                "return",
+                "super",
+                "switch",
+                "this",
+                "throw",
+                "true",
+                "try",
+                "typeof",
+                "var",
+                "void",
+                "while",
+                "with",
+                
+                //Strict Mode Reserved Words
+                "as",
+                "implements",
+                "interface",
+                "let",
+                "package",
+                "private",
+                "protected",
+                "public",
+                "static",
+                "yield",
+                
+                // Contextual Keywords
+                "any",
+                "boolean",
+                "constructor",
+                "declare",
+                "get",
+                "module",
+                "require",
+                "number",
+                "set",
+                "string",
+                "symbol",
+                "type",
+                "from",
+                "of"
+                );
+        
+        /**
+         * Return a list of all reserved words across all targets.
+         * Should be updated if another list of reserved words is added.
+         * FIXME: There's probably a better future-proof way to do this.
+         * @return A list containing the reserved words for all targets.
+         */
+        private static List<String> getAllReserved() {
+            List<String> l = new LinkedList<String>();
+            l.addAll(CReservedList);
+            l.addAll(CPPReservedList);
+            l.addAll(TSReservedList);
+            return l;
+        }
     }
 
 }
