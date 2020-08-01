@@ -171,7 +171,14 @@ class TypeScriptGenerator extends GeneratorBase {
             // Federates is never empty, but
             // it may contain a single federate with a
             // null instantiation.
-            if (federate.instantiation !== null && !isForeignLanguage(federate)) {
+            // Generate singletons and TS language
+            // federates. It is assumed a singleton
+            // federate (with a null instantiation)
+            // is always TS language.
+            if (federate.isSingleton ||
+                (federate.instantiation !== null 
+                && !isForeignLanguage(federate))
+            ) {
                 // Only generate one output if there is no federation.
                 if (!federate.isSingleton) {
                     federateFilename = baseFilename + '_' + federate.name
