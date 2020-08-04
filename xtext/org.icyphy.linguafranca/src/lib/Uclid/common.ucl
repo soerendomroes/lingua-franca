@@ -1,0 +1,74 @@
+/**
+ * A helper module for common types and constants
+ */
+module Common {
+    // FILE_SPECIFIC
+    type reactor_id_t = enum { «reactor_ids», 
+                                NULL };
+    type trigger_id_t = enum { «trigger_ids», 
+                                NULL_NULL };
+    type token_t      = integer; // To support "anytype"
+
+    // COMMON
+    type instant_t    = integer;
+    type is_present_t = boolean;
+
+    // Event type
+    type event_t = {
+                     instant_t,     // Tag
+                     reactor_id_t,  // From
+                     reactor_id_t,  // To
+                     trigger_id_t,  // Trigger
+                     token_t,       // Token
+                     is_present_t   // Is_present
+                   };
+
+    define is_present(e : event_t) : boolean
+    = (e != { -1, NULL, NULL, NULL_NULL, -1, false });
+}
+
+module SimpleQueue {
+    type * = Common.*;
+
+    // A normal queue implementation using define
+    type sq_data_t = event_t;
+    type sq_content_t = { sq_data_t,
+                          sq_data_t,
+                          sq_data_t,
+                          sq_data_t,
+                          sq_data_t };
+    type sq_t = { sq_content_t,
+                  integer,  // HEAD
+                  integer };  // TAIL
+
+    const SIZE : integer = 5;
+
+    define get(q : sq_content_t, i : integer) : sq_data_t
+    = if (i == 1) then q._1 else
+        (if (i == 2) then q._2 else
+            (if (i == 3) then q._3 else
+                (if (i == 4) then q._4 else
+                    if (i == 5) then q._5 else
+                        { -1, NULL, NULL, NULL_NULL, -1, false })));
+
+    define set(q : sq_content_t, i : integer, v : sq_data_t) : sq_content_t
+    = if (i == 1) then {v, q._2, q._3, q._4, q._5} else
+        (if (i == 2) then {q._1, v, q._3, q._4, q._5} else
+            (if (i == 3) then {q._1, q._2, v, q._4, q._5} else
+                (if (i == 4) then {q._1, q._2, q._3, v, q._5} else (
+                    if (i == 5) then {q._1, q._2, q._3, q._4, v} else
+                        q))));
+
+    define pushQ(q : sq_t, v : sq_data_t) : sq_t
+    = { set(q._1, q._3, v),
+        q._2,
+        (if (q._3 + 1 > SIZE) then 0 else (q._3 + 1)) };
+
+    define popQ(q : sq_t) : {sq_t, sq_data_t}
+    = if (get(q._1, q._2) != { -1, NULL, NULL, NULL_NULL, -1, false })
+      then  {{ set(q._1, q._2, { -1, NULL, NULL, NULL_NULL, -1, false }),
+                (if (q._2 + 1 > SIZE) then 0 else (q._2 + 1)),
+                q._3 }, 
+                get(q._1, q._2)}
+      else {q, { -1, NULL, NULL, NULL_NULL, -1, false }};
+}

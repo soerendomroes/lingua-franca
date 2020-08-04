@@ -1,3 +1,8 @@
 *.DS_Store
 .gradle/
 pubs/
+
+test/
+benchmark/
+example/
+**/src-gen/

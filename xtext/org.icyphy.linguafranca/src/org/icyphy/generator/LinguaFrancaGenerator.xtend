@@ -67,6 +67,9 @@ class LinguaFrancaGenerator extends AbstractGenerator {
                 case TS: {
                     generator = new TypeScriptGenerator()
                 }
+                case UCLID: {
+                	generator = new UclidGenerator()
+                }
 			}
 		}
 		generator.doGenerate(resource, fsa, context)
