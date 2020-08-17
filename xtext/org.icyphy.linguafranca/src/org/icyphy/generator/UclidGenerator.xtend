@@ -210,6 +210,14 @@ class UclidGenerator extends GeneratorBase {
         return arr
     }
     
+    protected def String getReactorInstanceID(String r) {
+        return '__' + r.toLowerCase() + '__'
+    }
+    
+    protected def String getVarIDfromTriggerID(String t) {
+        return t.split("_", 2).get(1)
+    }
+    
     protected def generateCommon(){
         code = new StringBuilder()
         val commonFilename = "common.ucl"
@@ -565,8 +573,8 @@ class UclidGenerator extends GeneratorBase {
                 // level[Source_startup] = 0;
                 // level[A_in] = 1;
                 // level[B_in] = 1;
-                «FOR r : reactorIDs»
-                    level[«r»] = 1 // FIXME
+                «FOR t : triggerIDs»
+                    level[«t»] = 1; // FIXME
                 «ENDFOR»
         
                 count = 0;
@@ -588,7 +596,7 @@ class UclidGenerator extends GeneratorBase {
                                         «getReactorFromTrigger(triggerIDs.get(i))», 
                                         «getReactorFromTrigger(triggerIDs.get(i))»,
                                         «triggerIDs.get(i)», 
-                                        0, true }
+                                        0, true };
                     «ENDIF»
                 «ENDFOR»
             }
@@ -652,10 +660,10 @@ class UclidGenerator extends GeneratorBase {
         // FIXME: generate input/output variables
         pr('''
             «FOR r : reactorIDs»
-                input «r»_to_S : event_t
+                input «r»_to_S : event_t;
             «ENDFOR»
             «FOR r : reactorIDs»
-                output S_to_«r» : event_t
+                output S_to_«r» : event_t;
             «ENDFOR»
         ''')
         
@@ -691,11 +699,7 @@ class UclidGenerator extends GeneratorBase {
             «FOR i : 0 ..< triggerIDs.length»
                 (if (i == «i + 1») then q._«i + 1» else
             «ENDFOR»
-            false
-            «FOR i : 0 ..< triggerIDs.length»
-                )
-            «ENDFOR»
-            ;
+            false«FOR i : 0 ..< triggerIDs.length»)«ENDFOR»;
         ''')
         
         pr('''
@@ -703,14 +707,10 @@ class UclidGenerator extends GeneratorBase {
             «FOR i : 0 ..< triggerIDs.length»
                 (if (i == «i + 1») then {
                     «FOR j : 0 ..< triggerIDs.length»
-                        «IF j == i» v «ELSE» q._ «j + 1»«ENDIF»
-                        «IF j != triggerIDs.length - 1», «ENDIF»
+                        «IF j == i»v«ELSE»q._«j + 1»«ENDIF»«IF j != triggerIDs.length - 1», «ENDIF»
                     «ENDFOR»} else
             «ENDFOR»
-            q
-            «FOR i : 0 ..< triggerIDs.length»
-                )
-            «ENDFOR»
+            q«FOR i : 0 ..< triggerIDs.length»)«ENDFOR»;
         ''')
         
         /*
@@ -955,10 +955,11 @@ class UclidGenerator extends GeneratorBase {
             ''')
             
             // Declare state variables, inputs, outputs, actions
+            // FIXME: expand to more state var types
             pr('''
                 // State variables
                 «FOR v : r.getStateVars»
-                    var «v.name» : event_t;
+                    var «v.name» : «IF v.getType.getId == 'int'»integer«ENDIF»;
                 «ENDFOR»
                 
                 // Inputs
@@ -1014,11 +1015,11 @@ class UclidGenerator extends GeneratorBase {
                 define all_inputs_empty () : boolean =
                 «IF r.getInputs.length > 0»
                     «FOR i : 0 ..< r.getInputs.length»
-                        !is_present(«r.getInputs.get(i).name») «IF i != r.getInputs.length» && «ENDIF»
+                        !is_present(«r.getInputs.get(i).name») «IF i != r.getInputs.length - 1» && «ENDIF»
                     «ENDFOR»
                 «ELSE»
                     true
-                «ENDIF»
+                «ENDIF»;
                 
             ''')
             
@@ -1047,6 +1048,12 @@ class UclidGenerator extends GeneratorBase {
                 // Generate reaction declaration based on triggers
                 pr('''
                     procedure rxn«rxn_postfix»()
+                ''')
+                
+                // Declare all state variables modifiable
+                // FIXME: check if this has unwanted side effects
+                pr('''
+                    modifies «FOR i : 0 ..< r.getStateVars.length»«r.getStateVars.get(i).name»«IF i != r.getStateVars.length - 1»,«ENDIF»«ENDFOR»;
                 ''')
                 
                 // Declare input variables to be modifiable
@@ -1113,7 +1120,7 @@ class UclidGenerator extends GeneratorBase {
                     // startup = NULL_EVENT;
                     // State variables
                     «FOR v : r.getStateVars»
-                        «v.name» = NULL_EVENT;
+                        «v.name» = «IF v.getType.getId == 'int'»0«ELSE»0«ENDIF»;
                     «ENDFOR»
                     
                     // Inputs
@@ -1135,9 +1142,8 @@ class UclidGenerator extends GeneratorBase {
                     «ENDIF»
                     
                     // File specific: init all finalize_ flags here
-                    // finalize_Source_startup = false;
                     «FOR t : getReactorTriggerIDs(r.name)»
-                        finalize_«t» = NULL_EVENT;
+                        finalize_«t» = false;
                     «ENDFOR»
                 }
             ''')
@@ -1154,8 +1160,8 @@ class UclidGenerator extends GeneratorBase {
                             }
                             */
                             «FOR t : getReactorTriggerIDs(r.name)»
-                            (__in__._4 == «r.name»_«t») : {
-                                «t»' = __in__;
+                            (__in__._4 == «t») : {
+                                «getVarIDfromTriggerID(t)»' = __in__;
                             }
                             «ENDFOR»
                         esac
@@ -1211,6 +1217,13 @@ class UclidGenerator extends GeneratorBase {
         code = new StringBuilder()
         val schedulerFilename = "main.ucl"
         
+        // Generate the init state of finalized reaction table
+        val tableInit = '''
+            «FOR i : 0 ..< triggerIDs.length»
+                false«IF i != triggerIDs.length - 1»,«ENDIF»
+            «ENDFOR»
+        '''
+        
         pr('''
         /********************************
          * The main module of the model *
@@ -1224,12 +1237,12 @@ class UclidGenerator extends GeneratorBase {
             
             // Reactors to scheduler
             «FOR r : reactorIDs»
-            var «r.name»_to_S : event_t;
+            var «r»_to_S : event_t;
             «ENDFOR»
             
             // Scheduler to reactors
             «FOR r : reactorIDs»
-            var S_to_«r.name» : event_t;
+            var S_to_«r» : event_t;
             «ENDFOR»
             
             // Finalized reaction indicator
@@ -1248,10 +1261,10 @@ class UclidGenerator extends GeneratorBase {
         pr('''
         instance scheduler : Scheduler(
             «FOR r : reactorIDs»
-            «r.name»_to_S : («r.name»_to_S),
+            «r»_to_S : («r»_to_S),
             «ENDFOR»
             «FOR r : reactorIDs»
-            S_to_«r.name» : (S_to_«r.name»),
+            S_to_«r» : (S_to_«r»),
             «ENDFOR»
             «FOR t : triggerIDs»
             finalize_«t» : (finalize_«t»),
@@ -1259,7 +1272,148 @@ class UclidGenerator extends GeneratorBase {
             «FOR i : 0 ..< reactorIDs.length»
             final_to_«reactorIDs.get(i)» : (final_to_«reactorIDs.get(i)»)«IF i != reactorIDs.length - 1»,«ENDIF»
             «ENDFOR»
+        );
         ''')
+        
+        // Generate reactor instances
+        for (r : reactorIDs) {
+            var triggers = getReactorTriggerIDs(r)
+            pr('''
+                instance «getReactorInstanceID(r)» : Reactor_«r»(
+                    t : (scheduler.t),
+                    __in__ : (S_to_«r»),
+                    __out__ : («r»_to_S),
+                    finalized : (final_to_«r»),
+                    «FOR i : 0 ..< triggers.length»
+                    finalize_«triggers.get(i)» : (finalize_«triggers.get(i)»)«IF i != triggers.length - 1»,«ENDIF»
+                    «ENDFOR»
+                    );
+            ''')
+        }
+        
+        pr('''
+        init {
+            NULL_EVENT = { -1, NULL, NULL, NULL_NULL, -1, false };
+            
+            // Reactors to scheduler
+            «FOR r : reactorIDs»
+            «r»_to_S = NULL_EVENT;
+            «ENDFOR»
+            
+            // Scheduler to reactors
+            «FOR r : reactorIDs»
+            S_to_«r» = NULL_EVENT;
+            «ENDFOR»
+            
+            // Finalized reaction indicator
+            «FOR t : triggerIDs»
+            finalize_«t» = false;
+            «ENDFOR»
+            
+            // Finalized reaction table
+            «FOR r : reactorIDs»
+            final_to_«r» = {
+                «tableInit»
+            };
+            «ENDFOR»
+        }
+        ''')
+        
+        pr('''
+        next {
+            next(scheduler);
+            «FOR r : reactorIDs»
+            next(«getReactorInstanceID(r)»);
+            «ENDFOR»
+        }
+        ''')
+        
+        // Get properties from the main preamble
+        /*
+        pr('''
+            «mainDef.getReactorClass.toDefinition.getPreamble»
+        ''')
+        */
+        
+        /*
+        control {
+            v = bmc(10);
+            check;
+            print_results;
+            v.print_cex(
+                        scheduler.t,
+                        scheduler.event_q.contents, 
+                        scheduler.event_q.op,
+                        scheduler.event_q.data,
+                        scheduler.event_q.count,
+                        scheduler.reaction_q.contents, 
+                        scheduler.reaction_q.op,
+                        scheduler.reaction_q.data,
+                        scheduler.reaction_q.count,
+                        scheduler.eq_op,
+                        scheduler.eq_data,
+                        scheduler.eq_out,
+                        scheduler.rq_op,
+                        scheduler.rq_data,
+                        scheduler.rq_out,
+                        scheduler.S_to_Source,
+                        scheduler.S_to_A,
+                        scheduler.S_to_B,
+                        scheduler.Source_to_S,
+                        scheduler.A_to_S,
+                        scheduler.B_to_S,
+                        src.__in__,
+                        src.__out__,
+                        a.__in__,
+                        a.__out__,
+                        a.s,
+                        b.__in__,
+                        b.__out__,
+                        b.s,
+                        final_to_Source
+            );
+        }  
+        */
+        pr('''
+        control {
+            v = bmc(10);
+            check;
+            print_results;
+            v.print_cex(
+                scheduler.t,
+                scheduler.event_q.contents, 
+                scheduler.event_q.op,
+                scheduler.event_q.data,
+                scheduler.event_q.count,
+                scheduler.reaction_q.contents, 
+                scheduler.reaction_q.op,
+                scheduler.reaction_q.data,
+                scheduler.reaction_q.count,
+                scheduler.eq_op,
+                scheduler.eq_data,
+                scheduler.eq_out,
+                scheduler.rq_op,
+                scheduler.rq_data,
+                scheduler.rq_out,
+                «FOR r : reactorIDs»
+                scheduler.S_to_«r»,
+                «ENDFOR»
+                «FOR r : reactorIDs»
+                scheduler.«r»_to_S,
+                «ENDFOR»
+                «FOR r : reactors»
+                «getReactorInstanceID(r.name)».__in__,
+                «getReactorInstanceID(r.name)».__out__,
+                «FOR v : r.getStateVars»
+                «getReactorInstanceID(r.name)».«v.name»,
+                «ENDFOR»
+                «ENDFOR»
+                scheduler.finalized
+            );
+        }
+        ''')
+        
+        pr('}')
         
         writeSourceCodeToFile(getCode().getBytes(), projectPath + File.separator + schedulerFilename)
     }
