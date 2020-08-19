@@ -43,6 +43,8 @@ import org.icyphy.linguaFranca.Variable
 import java.io.BufferedReader
 import java.io.FileReader
 
+import static extension org.icyphy.ASTUtils.*
+
 class UclidGenerator extends GeneratorBase {
     
     ////////////////////////////////////////////
@@ -218,7 +220,17 @@ class UclidGenerator extends GeneratorBase {
         return t.split("_", 2).get(1)
     }
     
-    protected def generateCommon(){
+    protected def ArrayList<String> getStartupTriggerIDs() {
+        var arr = new ArrayList<String>
+        for (t : triggerIDs) {
+            if (t.endsWith('_startup')) {
+                arr.add(t)
+            }
+        }
+        return arr
+    }
+    
+    protected def generateCommon(){ 
         code = new StringBuilder()
         val commonFilename = "common.ucl"
         val reactorIdStr = String.join(', ', reactorIDs)
@@ -310,7 +322,7 @@ class UclidGenerator extends GeneratorBase {
     protected def generatePQueue(){
         code = new StringBuilder()
         val pqueueFilename = "pqueue.ucl"
-        val startup_count = 0;
+        val startupTriggerIDs = getStartupTriggerIDs
         
         // FIXME: assign levels => reference to levels in LF.
         
@@ -570,9 +582,6 @@ class UclidGenerator extends GeneratorBase {
                 __done__ = false;
         
                 // File specific: levels
-                // level[Source_startup] = 0;
-                // level[A_in] = 1;
-                // level[B_in] = 1;
                 «FOR t : triggerIDs»
                     level[«t»] = 1; // FIXME
                 «ENDFOR»
@@ -589,15 +598,13 @@ class UclidGenerator extends GeneratorBase {
                 /********************************
                  * File specific: startup actions
                  ********************************/
-                count = «startup_count»;
-                «FOR i : 0 ..< triggerIDs.length»
-                    «IF triggerIDs.get(i).contains('startup')»
-                        contents._«i + 1» = { 0, 
-                                        «getReactorFromTrigger(triggerIDs.get(i))», 
-                                        «getReactorFromTrigger(triggerIDs.get(i))»,
-                                        «triggerIDs.get(i)», 
-                                        0, true };
-                    «ENDIF»
+                count = «startupTriggerIDs.length»;
+                «FOR i : 0 ..< startupTriggerIDs.length»
+                contents._«i + 1» = { 0, 
+                                    «getReactorFromTrigger(startupTriggerIDs.get(i))», 
+                                    «getReactorFromTrigger(startupTriggerIDs.get(i))»,
+                                    «startupTriggerIDs.get(i)», 
+                                    0, true };
                 «ENDFOR»
             }
         
@@ -1154,11 +1161,6 @@ class UclidGenerator extends GeneratorBase {
                     // File specific: load __in__ onto respective input variables
                     if (is_present(__in__)) {
                         case
-                            /* 
-                            (__in__._4 == Source_startup) : {
-                                startup' = __in__;
-                            }
-                            */
                             «FOR t : getReactorTriggerIDs(r.name)»
                             (__in__._4 == «t») : {
                                 «getVarIDfromTriggerID(t)»' = __in__;
@@ -1186,16 +1188,16 @@ class UclidGenerator extends GeneratorBase {
                     else {
                         // File specific: trigger reaction
                         case
-                            /*
-                            (is_present(startup)) : {
-                                call () = rxn_startup();
-                            }
-                            */
+                            «IF reactorIDsWithStartups.contains(r.name)»
+                                (is_present(startup)) : {
+                                    call () = rxn_startup();
+                                }
+                            «ENDIF»
                             «FOR v : r.getInputs»
                                 (is_present(«v.name»)) : {
                                     call () = rxn_«v.name»();    
                                 }
-                            «ENDFOR»
+                            «ENDFOR» 
                             
                             (all_inputs_empty()) : {
                                 __pop__' = popQ(outQ);
@@ -1276,16 +1278,24 @@ class UclidGenerator extends GeneratorBase {
         ''')
         
         // Generate reactor instances
-        for (r : reactorIDs) {
-            var triggers = getReactorTriggerIDs(r)
+        // FIXME: move decl name collection to top-level doGenerate
+        //        support multiple declarations of the same reactor
+        val reactorDeclNames = new ArrayList<String>
+        for (r : reactors) {
+            for (i : this.instantiationGraph.getInstantiations(r)) {
+                reactorDeclNames.add(i.name)
+            }
+        }
+        for (i : 0 ..< reactorIDs.length) {
+            var triggers = getReactorTriggerIDs(reactorIDs.get(i))
             pr('''
-                instance «getReactorInstanceID(r)» : Reactor_«r»(
+                instance «reactorDeclNames.get(i)» : Reactor_«reactorIDs.get(i)»(
                     t : (scheduler.t),
-                    __in__ : (S_to_«r»),
-                    __out__ : («r»_to_S),
-                    finalized : (final_to_«r»),
-                    «FOR i : 0 ..< triggers.length»
-                    finalize_«triggers.get(i)» : (finalize_«triggers.get(i)»)«IF i != triggers.length - 1»,«ENDIF»
+                    __in__ : (S_to_«reactorIDs.get(i)»),
+                    __out__ : («reactorIDs.get(i)»_to_S),
+                    finalized : (final_to_«reactorIDs.get(i)»),
+                    «FOR j : 0 ..< triggers.length»
+                    finalize_«triggers.get(j)» : (finalize_«triggers.get(j)»)«IF j != triggers.length - 1»,«ENDIF»
                     «ENDFOR»
                     );
             ''')
@@ -1322,58 +1332,18 @@ class UclidGenerator extends GeneratorBase {
         pr('''
         next {
             next(scheduler);
-            «FOR r : reactorIDs»
-            next(«getReactorInstanceID(r)»);
+            «FOR i : 0 ..< reactorDeclNames.length»
+            next(«reactorDeclNames.get(i)»);
             «ENDFOR»
         }
         ''')
         
         // Get properties from the main preamble
-        /*
-        pr('''
-            «mainDef.getReactorClass.toDefinition.getPreamble»
-        ''')
-        */
+        var defn = this.mainDef.reactorClass.toDefinition
+        for (p : defn.preambles ?: emptyList) {
+            pr(p.code.toText)
+        }
         
-        /*
-        control {
-            v = bmc(10);
-            check;
-            print_results;
-            v.print_cex(
-                        scheduler.t,
-                        scheduler.event_q.contents, 
-                        scheduler.event_q.op,
-                        scheduler.event_q.data,
-                        scheduler.event_q.count,
-                        scheduler.reaction_q.contents, 
-                        scheduler.reaction_q.op,
-                        scheduler.reaction_q.data,
-                        scheduler.reaction_q.count,
-                        scheduler.eq_op,
-                        scheduler.eq_data,
-                        scheduler.eq_out,
-                        scheduler.rq_op,
-                        scheduler.rq_data,
-                        scheduler.rq_out,
-                        scheduler.S_to_Source,
-                        scheduler.S_to_A,
-                        scheduler.S_to_B,
-                        scheduler.Source_to_S,
-                        scheduler.A_to_S,
-                        scheduler.B_to_S,
-                        src.__in__,
-                        src.__out__,
-                        a.__in__,
-                        a.__out__,
-                        a.s,
-                        b.__in__,
-                        b.__out__,
-                        b.s,
-                        final_to_Source
-            );
-        }  
-        */
         pr('''
         control {
             v = bmc(10);
@@ -1401,11 +1371,11 @@ class UclidGenerator extends GeneratorBase {
                 «FOR r : reactorIDs»
                 scheduler.«r»_to_S,
                 «ENDFOR»
-                «FOR r : reactors»
-                «getReactorInstanceID(r.name)».__in__,
-                «getReactorInstanceID(r.name)».__out__,
-                «FOR v : r.getStateVars»
-                «getReactorInstanceID(r.name)».«v.name»,
+                «FOR i : 0 ..< reactors.length»
+                «reactorDeclNames.get(i)».__in__,
+                «reactorDeclNames.get(i)».__out__,
+                «FOR v : reactors.get(i).getStateVars»
+                «reactorDeclNames.get(i)».«v.name»,
                 «ENDFOR»
                 «ENDFOR»
                 scheduler.finalized
