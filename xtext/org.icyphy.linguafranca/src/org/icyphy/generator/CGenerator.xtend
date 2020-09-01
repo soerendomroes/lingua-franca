@@ -2213,7 +2213,7 @@ class CGenerator extends GeneratorBase {
                         for (multiportInstance : output.instances) {
                             pr(startTimeStep, '''
                                 // Add port «output.getFullName» to array of is_present fields.
-                                __is_present_fields[«startTimeStepIsPresentCount»] = &«nameOfSelfStruct»->__«output.name»[«j»].is_present;
+                                __is_present_fields[«startTimeStepIsPresentCount»] = &«nameOfSelfStruct»->«getStackPortMember('''__«output.name»[«j»]''', "is_present")»;
                             ''')
                             startTimeStepIsPresentCount++
                             j++
@@ -2221,7 +2221,7 @@ class CGenerator extends GeneratorBase {
                     } else {
                         pr(startTimeStep, '''
                             // Add port «output.getFullName» to array of is_present fields.
-                            __is_present_fields[«startTimeStepIsPresentCount»] = &«nameOfSelfStruct»->__«output.name».is_present;
+                            __is_present_fields[«startTimeStepIsPresentCount»] = &«nameOfSelfStruct»->«getStackPortMember('''__«output.name»''', "is_present")»;
                         ''')
                         startTimeStepIsPresentCount++
                     }
@@ -2489,6 +2489,28 @@ class CGenerator extends GeneratorBase {
     static def triggerStructName(PortInstance port, ReactionInstance reaction) {
         return '''«selfStructName(reaction.parent)»->__«port.parent.name».«port.name»_trigger;'''
     }
+    
+    /**
+     * Generates C code to retrieve port->member
+     * This function is used for clarity and is called whenever struct is allocated on heap memory.
+     * @param portName The name of the port in string
+     * @param member The member's name (e.g., is_present)
+     * @return Generated code
+     */
+    def getHeapPortMember(String portName, String member) '''
+        «portName»->«member»
+    '''
+    
+    /**
+     * Generates C code to retrieve port.member
+     * This function is used for clarity and is called whenever struct is allocated on stack memory.
+     * @param portName The name of the port in string
+     * @param member The member's name(e.g., is_present)
+     * @return Generated code
+     */
+    def getStackPortMember(String portName, String member) '''
+        «portName».«member»
+    '''
 
     /** Generate code to instantiate the specified reactor instance and
      *  initialize it.
@@ -2669,10 +2691,19 @@ class CGenerator extends GeneratorBase {
                             } catch (NumberFormatException ex) {
                                 widthExpressions.add(widthSpec)
                             }
+<<<<<<< HEAD
+=======
+                            pr(initialization, '''
+                                for (int i = 0; i < «widthSpec»; i++) {
+                                    «nameOfSelfStruct»->___reaction_«reactionCount».output_produced[«index» + i]
+                                            = &«nameOfSelfStruct»->«getStackPortMember('''__«ASTUtils.toText(effect)»[i]''', "is_present")»;
+                                }
+                            ''')
+>>>>>>> First successful code generation for Composition
                         } else {
                             pr(initialization, '''
                                 «nameOfSelfStruct»->___reaction_«reactionCount».output_produced[«index»]
-                                        = &«nameOfSelfStruct»->__«ASTUtils.toText(effect)».is_present;
+                                        = &«nameOfSelfStruct»->«getStackPortMember('''__«ASTUtils.toText(effect)»''', "is_present")»;
                             ''')
                             outputCount++
                         }
@@ -2831,16 +2862,26 @@ class CGenerator extends GeneratorBase {
                 var j = 0
                 for (multiportInstance : output.instances) {
                     var numDestinations = multiportInstance.numDestinationReactors
+<<<<<<< HEAD
                     // This has to appear after memory is allocated for the output array.
                     pr(initializeTriggerObjectsEnd, '''
                         «nameOfSelfStruct»->__«output.name»[«j»].num_destinations = «numDestinations»;
+=======
+                    pr(initializeTriggerObjects, '''
+                        «nameOfSelfStruct»->«getStackPortMember('''__«output.name»[«j»]''', "num_destinations")» = «numDestinations»;
+>>>>>>> First successful code generation for Composition
                     ''')
                     j++
                 }
             } else {
                 var numDestinations = output.numDestinationReactors
+<<<<<<< HEAD
                 pr(initializeTriggerObjectsEnd, '''
                     «nameOfSelfStruct»->__«output.name».num_destinations = «numDestinations»;
+=======
+                pr(initializeTriggerObjects, '''
+                    «nameOfSelfStruct»->«getStackPortMember('''__«output.name»''', "num_destinations")» = «numDestinations»;
+>>>>>>> First successful code generation for Composition
                 ''')
             }
         }
@@ -2860,6 +2901,7 @@ class CGenerator extends GeneratorBase {
                         var numDestinations = 0
                         if(!port.dependentReactions.isEmpty) numDestinations = 1
                         numDestinations += port.dependentPorts.size
+<<<<<<< HEAD
                         // If it is a multiport, then the struct port object is a pointer.
                         // Otherwise, it is the actual port struct.
                         var portIndex = '.'
@@ -2868,6 +2910,10 @@ class CGenerator extends GeneratorBase {
                         }
                         pr(initializeTriggerObjectsEnd, '''
                             «nameOfSelfStruct»->__«port.parent.name».«port.name»«portIndex»num_destinations = «numDestinations»;
+=======
+                        pr(initializeTriggerObjects, '''
+                            «nameOfSelfStruct»->«getStackPortMember('''__«port.parent.name»''', getStackPortMember(port.name, "num_destinations").toString)» = «numDestinations»;
+>>>>>>> First successful code generation for Composition
                         ''')
                     }
                 }
@@ -3126,7 +3172,7 @@ class CGenerator extends GeneratorBase {
             self->__«outputName».value = («action.inferredType.targetType»)self->___«action.name».token->value;
             self->__«outputName».token = (token_t*)self->___«action.name».token;
             ((token_t*)self->___«action.name».token)->ref_count++;
-            self->__«outputName».is_present = true;
+            self->«getStackPortMember('''__«outputName»''', "is_present")» = true;
             '''
         } else {
             '''
