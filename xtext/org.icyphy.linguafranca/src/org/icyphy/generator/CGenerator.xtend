@@ -356,8 +356,8 @@ class CGenerator extends GeneratorBase {
         }
         
         // Create the output directories if they don't yet exist.
-        var srcGenPath = directory + File.separator + "src-gen"
-        var outPath = directory + File.separator + "bin"
+        var srcGenPath = getSrcGenPath()
+        var outPath = getBinGenPath
         var dir = new File(srcGenPath)
         if (!dir.exists()) dir.mkdirs()
         dir = new File(outPath)
@@ -688,7 +688,7 @@ class CGenerator extends GeneratorBase {
      */
     protected def writeCleanCode(String baseFilename)
     {
-        var srcGenPath = directory + File.separator + "src-gen"
+        var srcGenPath = getSrcGenPath()
     	//Cleanup the code so that it is more readable
         for (federate : federates) {
                 
@@ -714,7 +714,7 @@ class CGenerator extends GeneratorBase {
     /** Copy target specific files to the src-gen directory */
     protected def copyTargetFiles()
     {    	
-        var srcGenPath = directory + File.separator + "src-gen"
+        var srcGenPath = getSrcGenPath()
     	// Copy the required target language files into the target file system.
         // This will also overwrite previous versions.
         var targetFiles = newArrayList("ctarget.h");
@@ -751,8 +751,8 @@ class CGenerator extends GeneratorBase {
         // Derive target filename from the .lf filename.
         var cFilename = getTargetFileName(filename + "_RTI")
         
-        var srcGenPath = directory + File.separator + "src-gen"
-        var outPath = directory + File.separator + "bin"
+        var srcGenPath = getSrcGenPath()
+        var outPath = getBinGenPath()
 
         // Delete source previously produced by the LF compiler.
         var file = new File(srcGenPath + File.separator + cFilename)
@@ -871,7 +871,21 @@ class CGenerator extends GeneratorBase {
         fOut.close()
     }
     
-    /** Create the launcher shell scripts. This will create one or two files
+    /**
+     * Returns the desired source gen. path
+     */
+    def getSrcGenPath() {
+          directory + File.separator + "src-gen"
+    }
+     
+    /**
+     * Returns the desired output path
+     */
+    def getBinGenPath() {
+          directory + File.separator + "bin"
+    }
+    
+    /** Create the launcher shell scripts. This will create one or two file
      *  in the output path (bin directory). The first has name equal to
      *  the filename of the source file without the ".lf" extension.
      *  This will be a shell script that launches the
@@ -917,7 +931,7 @@ class CGenerator extends GeneratorBase {
         // to get screen to work looks like this:
         // ssh -t «target» cd «path»; screen -S «filename»_«federate.name» -L bin/«filename»_«federate.name» 2>&1
         
-        var outPath = directory + File.separator + "bin"
+        var outPath = getBinGenPath()
 
         val shCode = new StringBuilder()
         val distCode = new StringBuilder()
@@ -2853,26 +2867,15 @@ class CGenerator extends GeneratorBase {
                 var j = 0
                 for (multiportInstance : output.instances) {
                     var numDestinations = multiportInstance.numDestinationReactors
-<<<<<<< HEAD
-                    // This has to appear after memory is allocated for the output array.
-                    pr(initializeTriggerObjectsEnd, '''
-                        «nameOfSelfStruct»->__«output.name»[«j»].num_destinations = «numDestinations»;
-=======
                     pr(initializeTriggerObjects, '''
                         «nameOfSelfStruct»->«getStackPortMember('''__«output.name»[«j»]''', "num_destinations")» = «numDestinations»;
->>>>>>> First successful code generation for Composition
                     ''')
                     j++
                 }
             } else {
                 var numDestinations = output.numDestinationReactors
-<<<<<<< HEAD
-                pr(initializeTriggerObjectsEnd, '''
-                    «nameOfSelfStruct»->__«output.name».num_destinations = «numDestinations»;
-=======
                 pr(initializeTriggerObjects, '''
                     «nameOfSelfStruct»->«getStackPortMember('''__«output.name»''', "num_destinations")» = «numDestinations»;
->>>>>>> First successful code generation for Composition
                 ''')
             }
         }
@@ -3336,7 +3339,7 @@ class CGenerator extends GeneratorBase {
         	
         }
         // Make sure src-gen directory exists.
-        val srcGenDir = new File(directory + File.separator + "src-gen/")
+        val srcGenDir = new File(srcGenPath + File.separator)
         srcGenDir.mkdirs
         
         // Process target files. Copy each of them into the src-gen dir.
@@ -3346,7 +3349,7 @@ class CGenerator extends GeneratorBase {
             if (name.endsWith(".h")) {
                 pr('''#include "«name»"''')
             }
-            val target = new File(directory + File.separator + "src-gen/" + name)
+            val target = new File(srcGenPath + File.separator + name)
             if (target.exists) {
                 target.delete
             }
