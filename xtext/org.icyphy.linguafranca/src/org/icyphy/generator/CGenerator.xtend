@@ -64,6 +64,7 @@ import org.icyphy.linguaFranca.VarRef
 import org.icyphy.linguaFranca.Variable
 
 import static extension org.icyphy.ASTUtils.*
+import org.icyphy.linguaFranca.Preamble
 
 /** 
  * Generator for C target. This class generates C code definining each reactor
@@ -1134,12 +1135,8 @@ class CGenerator extends GeneratorBase {
         }
         
         // Preamble code contains state declarations with static initializers.
-        for (p : defn.preambles ?: emptyList) {
-            pr("// *********** From the preamble, verbatim:")
-            prSourceLineNumber(p.code)
-            pr(p.code.toText)
-            pr("\n// *********** End of preamble.")
-        }
+        generateUserPreamblesForReactor(defn)
+            
         // Some of the following methods create lines of code that need to
         // go into the constructor.  Collect those lines of code here:
         val constructorCode = new StringBuilder()
@@ -1154,6 +1151,19 @@ class CGenerator extends GeneratorBase {
         pr("")
 
         
+    }
+    
+    /**
+     * Generates preambles defined by user for a given reactor
+     * @param reactor The given reactor
+     */
+    def generateUserPreamblesForReactor(Reactor reactor) {
+        for (p : reactor.preambles ?: emptyList) {
+            pr("// *********** From the preamble, verbatim:")
+            prSourceLineNumber(p.code)
+            pr(p.code.toText)
+            pr("\n// *********** End of preamble.")
+        }
     }
     
     /**
