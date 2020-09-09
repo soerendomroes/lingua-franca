@@ -582,9 +582,10 @@ class UclidGenerator extends GeneratorBase {
                 __done__ = false;
         
                 // File specific: levels
-                «FOR t : triggerIDs»
-                    level[«t»] = 1; // FIXME
-                «ENDFOR»
+                level[Train_move] = 3; 
+                level[Door_lock] = 3;
+                level[Controller_startup] = 1;
+                level[Controller_external] = 2;
         
                 count = 0;
                 contents = {
@@ -1059,9 +1060,11 @@ class UclidGenerator extends GeneratorBase {
                 
                 // Declare all state variables modifiable
                 // FIXME: check if this has unwanted side effects
-                pr('''
-                    modifies «FOR i : 0 ..< r.getStateVars.length»«r.getStateVars.get(i).name»«IF i != r.getStateVars.length - 1»,«ENDIF»«ENDFOR»;
-                ''')
+                if (r.getStateVars.length > 0) {
+                    pr('''
+                        modifies «FOR i : 0 ..< r.getStateVars.length»«r.getStateVars.get(i).name»«IF i != r.getStateVars.length - 1»,«ENDIF»«ENDFOR»;
+                    ''')
+                }
                 
                 // Declare input variables to be modifiable
                 for (t : rxn.getTriggers) {
@@ -1194,6 +1197,11 @@ class UclidGenerator extends GeneratorBase {
                                 }
                             «ENDIF»
                             «FOR v : r.getInputs»
+                                (is_present(«v.name»)) : {
+                                    call () = rxn_«v.name»();    
+                                }
+                            «ENDFOR» 
+                            «FOR v : r.getActions»
                                 (is_present(«v.name»)) : {
                                     call () = rxn_«v.name»();    
                                 }
@@ -1346,7 +1354,7 @@ class UclidGenerator extends GeneratorBase {
         
         pr('''
         control {
-            v = bmc(10);
+            v = bmc(15);
             check;
             print_results;
             v.print_cex(
