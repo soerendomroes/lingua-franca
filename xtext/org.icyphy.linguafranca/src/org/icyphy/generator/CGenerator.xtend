@@ -697,6 +697,8 @@ class CGenerator extends GeneratorBase {
     protected def writeCleanCode(String baseFilename)
     {
         var srcGenPath = getSrcGenPath()
+        
+        var baseFileName = filename
     	//Cleanup the code so that it is more readable
         for (federate : federates) {
                 
@@ -716,6 +718,9 @@ class CGenerator extends GeneratorBase {
             fOut.close()
             
         }
+        
+        // Restore the filename
+        filename = baseFileName
     	
     }
     
