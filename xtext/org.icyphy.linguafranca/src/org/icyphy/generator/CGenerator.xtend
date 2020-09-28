@@ -3447,35 +3447,8 @@ class CGenerator extends GeneratorBase {
 
         includeTargetLanguageSourceFiles()
         
-        if (targetFast) {
-            // The runCommand has a first entry that is ignored but needed.
-            if (runCommand.length === 0) {
-                runCommand.add("X")
-            }
-            runCommand.add("-f")
-            runCommand.add("true")
-        }
-        if (targetKeepalive) {
-            // The runCommand has a first entry that is ignored but needed.
-            if (runCommand.length === 0) {
-                runCommand.add("X")
-            }
-            runCommand.add("-k")
-            runCommand.add("true")
-        }
-        if (targetTimeout >= 0) {
-            // The runCommand has a first entry that is ignored but needed.
-            if (runCommand.length === 0) {
-                runCommand.add("X")
-            }
-            runCommand.add("-o")
-            runCommand.add(Integer.toString(targetTimeout))
-            runCommand.add(targetTimeoutUnit.toString)
-        }
+        parseTargetParameters()
         
-        {
-        	
-        }
         // Make sure src-gen directory exists.
         val srcGenDir = new File(srcGenPath + File.separator)
         srcGenDir.mkdirs
@@ -3505,6 +3478,39 @@ class CGenerator extends GeneratorBase {
             }
             pr('#include "' + rootFilename + '.pb-c.h"')
         }
+    }
+    
+    /**
+     * Parse the target parameters and set flags to the runCommand
+     * accordingly.
+     */
+    def parseTargetParameters() {
+        if (targetFast) {
+            // The runCommand has a first entry that is ignored but needed.
+            if (runCommand.length === 0) {
+                runCommand.add("X")
+            }
+            runCommand.add("-f")
+            runCommand.add("true")
+        }
+        if (targetKeepalive) {
+            // The runCommand has a first entry that is ignored but needed.
+            if (runCommand.length === 0) {
+                runCommand.add("X")
+            }
+            runCommand.add("-k")
+            runCommand.add("true")
+        }
+        if (targetTimeout >= 0) {
+            // The runCommand has a first entry that is ignored but needed.
+            if (runCommand.length === 0) {
+                runCommand.add("X")
+            }
+            runCommand.add("-o")
+            runCommand.add(Integer.toString(targetTimeout))
+            runCommand.add(targetTimeoutUnit.toString)
+        }
+        
     }
     
     /** Add necessary header files specific to the target language.
