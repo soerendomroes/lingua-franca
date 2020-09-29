@@ -1411,6 +1411,13 @@ class CGenerator extends GeneratorBase {
         
         // Next handle parameters.
         for (parameter : reactor.allParameters) {
+            // Check for targetBankIndex
+            // FIXME: for now throw a reserved error
+            if(parameter.name.equals(targetBankIndex))
+            {
+                reportError('''«targetBankIndex» is reserved.''')
+            }
+            
             prSourceLineNumber(body, parameter)
             pr(body, parameter.getInferredType.targetType + ' ' + parameter.name + ';');
         }
@@ -1603,7 +1610,14 @@ class CGenerator extends GeneratorBase {
      * @return 
      */
     def generateStateVariablesForReactor(StringBuilder builder, Reactor reactor) {        
-        for (stateVar : reactor.allStateVars) {
+        for (stateVar : reactor.allStateVars) {            
+            // Check for targetBankIndex
+            // FIXME: for now throw a reserved error
+            if(stateVar.name.equals(targetBankIndex))
+            {
+                reportError('''«targetBankIndex» is reserved.''')
+            }
+            
             prSourceLineNumber(builder, stateVar)
             pr(builder, stateVar.getInferredType.targetType + ' ' + stateVar.name + ';');
         }
