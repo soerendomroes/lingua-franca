@@ -1598,7 +1598,7 @@ class CGenerator extends GeneratorBase {
      * @param constructorCode Code that is executed when the reactor is instantiated
      * @param destructorCode Code that is executed when the reactor instance is freed
      */
-    def generateSelfStructExtension(StringBuilder selfStructBody, ReactorDecl decl, FederateInstance instance, StringBuilder constructorCode, StringBuilder destructorCode) {
+    def void generateSelfStructExtension(StringBuilder selfStructBody, ReactorDecl decl, FederateInstance instance, StringBuilder constructorCode, StringBuilder destructorCode) {
         // Do nothing
     }
     
@@ -2976,7 +2976,7 @@ class CGenerator extends GeneratorBase {
      * @param instance The reactor instance
      * @param federate The federate instance
      */
-    def generateReactorInstanceExtension(StringBuilder initializationCode, ReactorInstance instance, FederateInstance federate) {
+    def void generateReactorInstanceExtension(StringBuilder initializationCode, ReactorInstance instance, FederateInstance federate) {
         // Do nothing
     }
     
