@@ -32,6 +32,36 @@ THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "pythontarget.h"
 
 //////////// set Function(s) /////////////
+static PyObject* py_SET(PyObject *self, PyObject *args)
+{
+    generic_port_instance_struct* port = (generic_port_instance_struct*)self;
+    PyObject* val, *tmp;
+
+    if (!PyArg_ParseTuple(args, "O", &val))
+    {
+        PyErr_SetString(PyExc_TypeError, "Could not set objects.");
+        return NULL;
+    }
+
+    
+    if(port == NULL)
+    {
+        fprintf(stderr, "Null pointer recieved.\n");
+        exit(1);
+    }
+    
+    if(val)
+    {   
+        tmp = port->value;
+        Py_INCREF(val);
+        _LF_SET(port, val);
+    }
+
+    Py_INCREF(Py_None);
+    return Py_None;
+}
+
+
 /**
  * Set the value and is_present field of self which is of type
  * LinguaFranca.port_capsule
@@ -60,7 +90,7 @@ THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  * @param args contains:
  *      @param val The value to insert into the port struct.
  */
-static PyObject* py_SET(PyObject *self, PyObject *args)
+static PyObject* py_SET_multiport(PyObject *self, PyObject *args)
 {
     generic_port_capsule_struct* p = (generic_port_capsule_struct*)self;
     PyObject* val, *tmp;
@@ -252,6 +282,116 @@ static PyObject* py_main(PyObject *self, PyObject *args)
 
 
 ///////////////// Functions used in port creation, initialization, deletion, and copying /////////////
+/**
+ * In order to implement mutable inputs, we need to deepcopy a port_instance.
+ * For this purpose, Python needs to be able to "pickle" the objects (convert
+ * them to the fomrat objectID(objmember1, ....))
+ * @param self A port with type port_instance_t with a template structure akin to
+ *             a generic_port_instance_struct* (therefore, self is castable to generic_port_instance_struct*)
+ * @return tuple A tuple of format objectID(port->value, port->is_present, port->num_destinations)
+ */
+static PyObject *
+port_instance_reduce(PyObject *self)
+{
+    PyObject *attr;
+    PyObject *obj;
+    PyObject *tuple;
+    generic_port_instance_struct* port;
+
+    obj = (PyObject*)self;
+    port = (generic_port_instance_struct*)obj;
+
+	attr = PyObject_GetAttrString(obj, "__class__");
+
+#ifdef VERBOSE
+    printf("Reduce called.\n");
+#endif
+
+    tuple = Py_BuildValue("O(Oii)", attr, port->value , port->is_present, port->num_destinations);
+    return tuple;
+}
+
+
+/**
+ * Called when a port_instance had to be deallocated (generally by the Python
+ * garbage collector).
+ * @param self An instance of generic_port_instance_struct*
+ */
+static void
+port_instance_dealloc(generic_port_instance_struct *self)
+{
+    Py_XDECREF(self->value);
+    Py_TYPE(self)->tp_free((PyObject *) self);
+}
+
+/**
+ * Create a new port_instance. Note that a LinguaFranca.port_instance PyObject
+ * follows the same structure as the @see generic_port_instance_struct.
+ * 
+ * To initialize the port_instance, this function first initializes a 
+ * generic_port_instance_struct* self using the tp_alloc property of 
+ * port_instance (@see port_isntance_t) and then assigns the members
+ * of self with default values of value = NULL, is_present = false,
+ * and num_destination = 0.
+ * @param type The Python type object. In this case, port_instance_t
+ * @param args The optional arguments that are:
+ *      @param value value of the port
+ *      @param is_present An indication of whether or not the value of the port
+ *                      is present at the current logical time.
+ *      @param num_destination Used for reference-keeping inside the C runtime
+ * @param kwds Keywords (@see Python keywords)
+ */
+static PyObject *
+port_intance_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
+{
+    generic_port_instance_struct *self;
+    self = (generic_port_instance_struct *) type->tp_alloc(type, 0);
+    if (self != NULL) {
+        self->value = NULL;
+        self->is_present = false;
+        self->num_destinations = 0;
+    }
+    
+    return (PyObject *) self;
+}
+
+/**
+ * Initialize the port instance self with the given optional values for
+ * value, is_present, and num_destinations. If any of these arguments
+ * are missing, the default values are assigned
+ * @see port_intance_new 
+ * @param self The port_instance PyObject that follows
+ *              the generic_port_instance_struct* internal structure
+ * @param args The optional arguments that are:
+ *      @param value value of the port
+ *      @param is_present An indication of whether or not the value of the port
+ *                      is present at the current logical time.
+ *      @param num_destination Used for reference-keeping inside the C runtime
+ */
+static int
+port_instance_init(generic_port_instance_struct *self, PyObject *args, PyObject *kwds)
+{
+    static char *kwlist[] = {"value", "is_present", "num_destinations", NULL};
+    PyObject *value = NULL, *tmp;
+
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|Opi", kwlist,
+                                     &value, &self->is_present,
+                                     &self->num_destinations))
+    {
+        return -1;
+    }
+
+    if (value){
+        tmp = self->value;
+        Py_INCREF(value);
+        self->value = value;
+        Py_XDECREF(tmp);
+    }
+
+    return 0;
+}
+
+
 /**
  * Called when a port_capsule has to be deallocated (generally by the Python
  * garbage collector).
@@ -596,6 +736,45 @@ action_capsule_init(generic_action_capsule_struct *self, PyObject *args, PyObjec
 
 ////// Ports //////
 /*
+ * The members of a port_instance, used to define
+ * a native Python type.
+ */
+static PyMemberDef port_instance_members[] = {
+    {"value", T_OBJECT, offsetof(generic_port_instance_struct, value), 0, "Value of the port"},
+    {"is_present", T_BOOL, offsetof(generic_port_instance_struct, is_present), 0, "Check if value is present at current logical time"},
+    {"num_destinations", T_INT, offsetof(generic_port_instance_struct, num_destinations), 0, "Number of destinations"},
+    {NULL}  /* Sentinel */
+};
+
+/*
+ * The function members of port_instance
+ */
+static PyMethodDef port_instance_methods[3] = {    
+    {"__reduce__", (PyCFunction)port_instance_reduce, METH_NOARGS, "Necessary for pickling objects"},
+    {"set", (PyCFunction)py_SET, METH_VARARGS, "Set value of the port as well as the is_present field"},
+    {NULL}  /* Sentinel */
+};
+
+
+/*
+ * The definition of port_instance type object.
+ * Used to describe how port_instance behaves.
+ */
+static PyTypeObject port_instance_t = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    .tp_name = "LinguaFranca.port_instance",
+    .tp_doc = "port_instance objects",
+    .tp_basicsize = sizeof(generic_port_instance_struct),
+    .tp_itemsize = 0,
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_new = port_intance_new,
+    .tp_init = (initproc) port_instance_init,
+    .tp_dealloc = (destructor) port_instance_dealloc,
+    .tp_members = port_instance_members,
+    .tp_methods = port_instance_methods,
+};
+
+/*
  * The members of a port_capsule, used to define
  * a native Python type.
  * port contains the port capsule, which holds a void* pointer to the underlying C port.
@@ -618,7 +797,7 @@ static PyMemberDef port_capsule_members[] = {
  */
 static PyMethodDef port_capsule_methods[] = {
     {"__getitem__", (PyCFunction)port_capsule_get_item, METH_O|METH_COEXIST, "x.__getitem__(y) <==> x[y]"},
-    {"set", (PyCFunction)py_SET, METH_VARARGS, "Set value of the port as well as the is_present field"},
+    {"set", (PyCFunction)py_SET_multiport, METH_VARARGS, "Set value of the port as well as the is_present field"},
     {NULL}  /* Sentinel */
 };
 
@@ -770,6 +949,10 @@ GEN_NAME(PyInit_,MODULE_NAME)(void)
     PyObject *m;
 
     // Initialize the port_instance type
+    if (PyType_Ready(&port_instance_t) < 0)
+        return NULL;
+    
+    // Initialize the port_instance type
     if (PyType_Ready(&port_capsule_t) < 0)
         return NULL;
 
@@ -785,6 +968,14 @@ GEN_NAME(PyInit_,MODULE_NAME)(void)
 
     if (m == NULL)
         return NULL;
+
+    // Add the port_instance type to the module's dictionary
+    Py_INCREF(&port_instance_t);
+    if (PyModule_AddObject(m, "port_instance", (PyObject *) &port_instance_t) < 0) {
+        Py_DECREF(&port_instance_t);
+        Py_DECREF(m);
+        return NULL;
+    }
 
     // Add the port_instance type to the module's dictionary
     Py_INCREF(&port_capsule_t);

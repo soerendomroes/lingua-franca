@@ -93,6 +93,7 @@ PyObject *globalPythonModuleDict = NULL;
  *                   connections to destinations.
  **/
 typedef struct {
+    PyObject_HEAD
     PyObject* value;
     bool is_present;
     int num_destinations;
@@ -202,6 +203,8 @@ typedef struct {
  *      @param val The value to insert into the port struct.
  */
 static PyObject* py_SET(PyObject *self, PyObject *args);
+
+static PyObject* py_SET_multiport(PyObject *self, PyObject *args);
 
 //////////////////////////////////////////////////////////////
 /////////////  schedule Functions (to schedule an action)

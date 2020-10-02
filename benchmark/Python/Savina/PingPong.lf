@@ -32,7 +32,7 @@
 target Python {
     fast: true
 };
-reactor Ping(count(1000000)) {
+reactor Ping(count(10000)) {
     input receive;
     output send;
     state pingsLeft(count);
@@ -52,7 +52,7 @@ reactor Ping(count(1000000)) {
             stop()
     =}
 }
-reactor Pong(expected(1000000)) {
+reactor Pong(expected(10000)) {
     input receive;
     output send;
     state count(0);

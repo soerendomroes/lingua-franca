@@ -130,6 +130,17 @@ class PythonGenerator extends CGenerator {
 	// Regular expression pattern for pointer types. The star at the end has to be visible.
     static final Pattern pointerPatternVariable = Pattern.compile("^\\s*+(\\w+)\\s*\\*\\s*$");
     
+        /**
+     * Generates C code to retrieve port.member
+     * This function is used for clarity and is called whenever struct is allocated on stack memory.
+     * @param portName The name of the port in string
+     * @param member The member's name(e.g., is_present)
+     * @return Generated code
+     */
+    override getPortMember(String portName, String member) '''
+        «portName»->«member»
+    '''
+    
    ////////////////////////////////////////////
     //// Public methods
     
@@ -880,30 +891,32 @@ class PythonGenerator extends CGenerator {
         val reactor = decl.toDefinition
         // First, handle inputs.
         for (input : reactor.allInputs) {
-            if (input.inferredType.isTokenType) {
+            if (input.isMultiport) {
+                // Use port capsules for multiports
                 pr(input, code, '''
-                    typedef «generic_port_type_with_token» «variableStructType(input, decl)»;
+                    typedef «generic_port_type» «variableStructType(input, decl)»;
                 ''')
             }
             else
             {
                 pr(input, code, '''
-                   typedef «generic_port_type» «variableStructType(input, decl)»;
+                   typedef «generic_port_type»* «variableStructType(input, decl)»;
                 ''')                
             }
             
         }
         // Next, handle outputs.
         for (output : reactor.allOutputs) {
-            if (output.inferredType.isTokenType) {
+            if (output.isMultiport) {
+                 // Use port capsules for multiports
                  pr(output, code, '''
-                    typedef «generic_port_type_with_token» «variableStructType(output, decl)»;
+                    typedef «generic_port_type» «variableStructType(output, decl)»;
                  ''')
             }
             else
             {
                 pr(output, code, '''
-                    typedef «generic_port_type» «variableStructType(output, decl)»;
+                    typedef «generic_port_type»* «variableStructType(output, decl)»;
                 ''')
             }
         }
@@ -1293,7 +1306,11 @@ class PythonGenerator extends CGenerator {
             '''
             // Create a token
             token_t* t = create_token(sizeof(PyObject*));
+            «IF (port.variable as Port).isMultiport»
             t->value = self->__«ref»->value;
+            «ELSE»
+            t->value = (*self->__«ref»)->value;
+            «ENDIF»
             t->length = 1; // Length is 1
             
             // Pass the token along
@@ -1321,11 +1338,11 @@ class PythonGenerator extends CGenerator {
             self->__«outputName».value = («action.inferredType.targetType»)self->___«action.name».token->value;
             self->__«outputName».token = (token_t*)self->___«action.name».token;
             ((token_t*)self->___«action.name».token)->ref_count++;
-            self->«getStackPortMember('''__«outputName»''', "is_present")» = true;
+            self->«getPortMember('''__«outputName»''', "is_present")» = true;
             '''
         } else {
             '''
-            SET(«outputName», «action.name»->token->value);
+            SET(self->__«outputName», «action.name»->token->value);
             '''
         }
     }
@@ -1616,6 +1633,7 @@ class PythonGenerator extends CGenerator {
             }
         
         }
+        
     }
     
     
@@ -1643,7 +1661,41 @@ class PythonGenerator extends CGenerator {
                 pr(selfStructBody, '''PyObject *__py_deadline_function_«reactionIndex»;''')
             }
             
+            // Initialize outputs of contained reactors
+            for (effect : reaction.effects ?:emptyList)
+            {
+                if(effect.variable instanceof Input)
+                {
+                    pr(effect.variable , constructorCode, '''
+                        self->__«effect.container.name».«effect.variable.name» =  PyObject_GC_New(generic_port_instance_struct, &port_instance_t);
+                    ''')
+                }
+                else {
+                    // Do nothing
+                }
+            }
+            
             reactionIndex++
+        }
+        
+         // Next handle inputs.
+        for (input : reactor.allInputs) {
+           // Allocate the default value so that unconnected inputs are initialized as PyObjects
+           if(!input.isMultiport)
+           {
+               pr(input, constructorCode, '''
+               self->__default__«input.name» = port_instance_t.tp_new(&port_instance_t, NULL, NULL);
+               ''')           
+           }
+        }
+        
+        for (output : reactor.allOutputs) {
+            if (!output.isMultiport) {
+                pr(output, constructorCode, '''
+                    self->__«output.name» =  PyObject_GC_New(generic_port_instance_struct, &port_instance_t);
+                ''')
+
+            }
         }
     }
         
@@ -1692,7 +1744,7 @@ class PythonGenerator extends CGenerator {
             if(!(port.variable as Port).isMultiport)
             {
                 pyObjectDescriptor.append("O")
-                pyObjects.append(''', convert_C_port_to_py(«port.container.name».«port.variable.name», -2)''')
+                pyObjects.append(''', «port.container.name».«port.variable.name»''')
             }
             else
             {                
@@ -1725,7 +1777,7 @@ class PythonGenerator extends CGenerator {
             // array of pointers.
             if (!output.isMultiport) {
                 pyObjectDescriptor.append("O")
-                pyObjects.append(''', convert_C_port_to_py(«output.name», -2)''')
+                pyObjects.append(''', self->__«output.name»''')
             } else if (output.isMultiport) {
                 // Set the _width variable.                
                 pyObjectDescriptor.append("O")
@@ -1756,7 +1808,7 @@ class PythonGenerator extends CGenerator {
         else
         {
             pyObjectDescriptor.append("O")
-            pyObjects.append(''', convert_C_port_to_py(«definition.name».«input.name», -2)''')        
+            pyObjects.append(''', *«definition.name».«input.name»''')        
         }
     }
     
@@ -1787,12 +1839,12 @@ class PythonGenerator extends CGenerator {
         if (!input.isMutable && !input.isMultiport) {
             // Non-mutable, non-multiport, primitive type.
             pyObjectDescriptor.append("O")
-            pyObjects.append(''', convert_C_port_to_py(«input.name», «input.name»_width)''')
+            pyObjects.append(''', *«input.name»''')
         } else if (input.isMutable && !input.isMultiport) {
             // Mutable, non-multiport, primitive type.
             // TODO: handle mutable
             pyObjectDescriptor.append("O")
-            pyObjects.append(''', convert_C_port_to_py(«input.name», «input.name»_width)''')
+            pyObjects.append(''', *«input.name»''')
         } else if (!input.isMutable && input.isMultiport) {
             // Non-mutable, multiport, primitive.
             // TODO: support multiports

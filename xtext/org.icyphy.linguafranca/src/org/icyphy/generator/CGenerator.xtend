@@ -702,7 +702,7 @@ class CGenerator extends GeneratorBase {
     {
         var srcGenPath = getSrcGenPath()
         
-        var baseFileName = filename
+        var originalFileName = filename
     	//Cleanup the code so that it is more readable
         for (federate : federates) {
                 
@@ -724,7 +724,7 @@ class CGenerator extends GeneratorBase {
         }
         
         // Restore the filename
-        filename = baseFileName
+        filename = originalFileName
     	
     }
     
@@ -2289,12 +2289,19 @@ class CGenerator extends GeneratorBase {
                             var multiportIndex = stackStructOperator // '.'
                             if (sourcePort.multiportIndex >= 0) {
                                 multiportIndex = '[' + sourcePort.multiportIndex + ']->'
+                                pr(startTimeStep, '''
+                                    // Add port «sourcePort.getFullName» to array of is_present fields.
+                                    __is_present_fields[«startTimeStepIsPresentCount»] 
+                                            = &«containerSelfStructName»->__«sourcePort.parent.definition.name».«sourcePort.definition.name»«multiportIndex»is_present;
+                                ''')
                             }
-                            pr(startTimeStep, '''
-                                // Add port «sourcePort.getFullName» to array of is_present fields.
-                                __is_present_fields[«startTimeStepIsPresentCount»] 
-                                        = &«containerSelfStructName»->__«sourcePort.parent.definition.name».«sourcePort.definition.name»«multiportIndex»is_present;
-                            ''')
+                            else {
+                                pr(startTimeStep, '''
+                                    // Add port «sourcePort.getFullName» to array of is_present fields.
+                                    __is_present_fields[«startTimeStepIsPresentCount»] 
+                                            = &«containerSelfStructName»->«getPortMember('''__«sourcePort.parent.definition.name».«sourcePort.definition.name»''', "is_present")»;
+                                ''')
+                            }
                             startTimeStepIsPresentCount++
                         }
                     }
@@ -2326,7 +2333,7 @@ class CGenerator extends GeneratorBase {
                         for (multiportInstance : output.instances) {
                             pr(startTimeStep, '''
                                 // Add port «output.getFullName» to array of is_present fields.
-                                __is_present_fields[«startTimeStepIsPresentCount»] = &«nameOfSelfStruct»->«getStackPortMember('''__«output.name»[«j»]''', "is_present")»;
+                                __is_present_fields[«startTimeStepIsPresentCount»] = &«nameOfSelfStruct»->__«output.name»[«j»].is_present;
                             ''')
                             startTimeStepIsPresentCount++
                             j++
@@ -2334,7 +2341,7 @@ class CGenerator extends GeneratorBase {
                     } else {
                         pr(startTimeStep, '''
                             // Add port «output.getFullName» to array of is_present fields.
-                            __is_present_fields[«startTimeStepIsPresentCount»] = &«nameOfSelfStruct»->«getStackPortMember('''__«output.name»''', "is_present")»;
+                            __is_present_fields[«startTimeStepIsPresentCount»] = &«nameOfSelfStruct»->«getPortMember('''__«output.name»''', "is_present")»;
                         ''')
                         startTimeStepIsPresentCount++
                     }
@@ -2603,16 +2610,6 @@ class CGenerator extends GeneratorBase {
         return '''«selfStructName(reaction.parent)»->__«port.parent.name».«port.name»_trigger;'''
     }
     
-    /**
-     * Generates C code to retrieve port->member
-     * This function is used for clarity and is called whenever struct is allocated on heap memory.
-     * @param portName The name of the port in string
-     * @param member The member's name (e.g., is_present)
-     * @return Generated code
-     */
-    def getHeapPortMember(String portName, String member) '''
-        «portName»->«member»
-    '''
     
     
     /**
@@ -2629,7 +2626,7 @@ class CGenerator extends GeneratorBase {
      * @param member The member's name(e.g., is_present)
      * @return Generated code
      */
-    def getStackPortMember(String portName, String member) '''
+    def getPortMember(String portName, String member) '''
         «portName».«member»
     '''
 
@@ -2750,7 +2747,7 @@ class CGenerator extends GeneratorBase {
                         } else {
                             pr(initialization, '''
                                 «nameOfSelfStruct»->___reaction_«reactionCount».output_produced[«index»]
-                                        = &«nameOfSelfStruct»->«getStackPortMember('''__«ASTUtils.toText(effect)»''', "is_present")»;
+                                        = &«nameOfSelfStruct»->«getPortMember('''__«ASTUtils.toText(effect)»''', "is_present")»;
                             ''')
                             outputCount++
                         }
@@ -2850,14 +2847,14 @@ class CGenerator extends GeneratorBase {
                 for (multiportInstance : output.instances) {
                     var numDestinations = multiportInstance.numDestinationReactors
                     pr(initializeTriggerObjectsEnd, '''
-                        «nameOfSelfStruct»->«getStackPortMember('''__«output.name»[«j»]''', "num_destinations")» = «numDestinations»;
+                        «nameOfSelfStruct»->__«output.name»[«j»].num_destinations = «numDestinations»;
                     ''')
                     j++
                 }
             } else {
                 var numDestinations = output.numDestinationReactors
                 pr(initializeTriggerObjectsEnd, '''
-                    «nameOfSelfStruct»->«getStackPortMember('''__«output.name»''', "num_destinations")» = «numDestinations»;
+                    «nameOfSelfStruct»->«getPortMember('''__«output.name»''', "num_destinations")» = «numDestinations»;
                 ''')
             }
         }
@@ -2882,10 +2879,16 @@ class CGenerator extends GeneratorBase {
                         var portIndex = stackStructOperator // '.'
                         if (port.multiportIndex >= 0) {
                             portIndex = '[' + port.multiportIndex + ']->'
+                            pr(initializeTriggerObjectsEnd, '''
+                                «nameOfSelfStruct»->__«port.parent.name».«port.name»«portIndex»num_destinations = «numDestinations»;
+                            ''')
                         }
-                        pr(initializeTriggerObjectsEnd, '''
-                            «nameOfSelfStruct»->__«port.parent.name».«port.name»«portIndex»num_destinations = «numDestinations»;
-                        ''')
+                        else
+                        {
+                            pr(initializeTriggerObjectsEnd, '''
+                                «nameOfSelfStruct»->«getPortMember('''__«port.parent.name».«port.name»''', "num_destinations")» = «numDestinations»;
+                            ''')                            
+                        }
                     }
                 }
             }
@@ -3147,7 +3150,7 @@ class CGenerator extends GeneratorBase {
             pr(initialization, '''
                 for (int i = 0; i < «widthSpec»; i++) {
                     «nameOfSelfStruct»->___reaction_«reationIdx».output_produced[«startIdx» + i]
-                            = &«nameOfSelfStruct»->«getStackPortMember('''__«ASTUtils.toText(effect)»[i]''', "is_present")»;
+                            = &«nameOfSelfStruct»->__«ASTUtils.toText(effect)»[i].is_present;
                 }
             ''')
         } else {
@@ -3346,7 +3349,7 @@ class CGenerator extends GeneratorBase {
             self->__«outputName».value = («action.inferredType.targetType»)self->___«action.name».token->value;
             self->__«outputName».token = (token_t*)self->___«action.name».token;
             ((token_t*)self->___«action.name».token)->ref_count++;
-            self->«getStackPortMember('''__«outputName»''', "is_present")» = true;
+            self->«getPortMember('''__«outputName»''', "is_present")» = true;
             '''
         } else {
             '''
