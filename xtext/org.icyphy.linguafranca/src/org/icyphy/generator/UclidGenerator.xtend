@@ -4,44 +4,16 @@ package org.icyphy.generator
 
 import java.io.File
 import java.io.FileOutputStream
-import java.math.BigInteger
 import java.util.ArrayList
-import java.util.Collection
-import java.util.HashMap
-import java.util.HashSet
 import java.util.LinkedList
+import java.util.regex.Matcher
 import java.util.regex.Pattern
-import org.eclipse.emf.common.util.URI
-import org.eclipse.emf.ecore.EObject
 import org.eclipse.emf.ecore.resource.Resource
-import org.eclipse.emf.ecore.resource.ResourceSet
 import org.eclipse.xtext.generator.IFileSystemAccess2
 import org.eclipse.xtext.generator.IGeneratorContext
-import org.eclipse.xtext.nodemodel.util.NodeModelUtils
-import org.icyphy.ASTUtils
-import org.icyphy.InferredType
-import org.icyphy.TimeValue
 import org.icyphy.linguaFranca.Action
-import org.icyphy.linguaFranca.ActionOrigin
-import org.icyphy.linguaFranca.Code
-import org.icyphy.linguaFranca.Import
-import org.icyphy.linguaFranca.Input
-import org.icyphy.linguaFranca.Instantiation
-import org.icyphy.linguaFranca.LinguaFrancaFactory
-import org.icyphy.linguaFranca.LinguaFrancaPackage
-import org.icyphy.linguaFranca.Output
-import org.icyphy.linguaFranca.Port
-import org.icyphy.linguaFranca.Reaction
-import org.icyphy.linguaFranca.Reactor
-import org.icyphy.linguaFranca.StateVar
-import org.icyphy.linguaFranca.TimeUnit
-import org.icyphy.linguaFranca.Timer
-import org.icyphy.linguaFranca.TriggerRef
-import org.icyphy.linguaFranca.TypedVariable
 import org.icyphy.linguaFranca.VarRef
-import org.icyphy.linguaFranca.Variable
-import java.io.BufferedReader
-import java.io.FileReader
+
 
 import static extension org.icyphy.ASTUtils.*
 
@@ -94,10 +66,14 @@ class UclidGenerator extends GeneratorBase {
     var ArrayList<String> reactorIDs
     var ArrayList<String> triggerIDs
     var ArrayList<String> reactorIDsWithStartups
+    var ArrayList<String> specs
     
     // Path to the generated project directory
     var String projectPath
     var String srcGenPath
+    
+    // Concurrent regex pattern
+    var concurrentPattern = Pattern.compile("^(concurrent)", Pattern.CASE_INSENSITIVE);
     
     // FIXME: find out if this is needed.
     new () {
@@ -115,41 +91,55 @@ class UclidGenerator extends GeneratorBase {
         // The following generates code needed by all the reactors.
         super.doGenerate(resource, fsa, context)
         
-        // Generate code for each reactor: reactor.ucl
         
         // Create the src-gen directories if they don't yet exist.
         srcGenPath = directory + File.separator + "src-gen"
         var dir = new File(srcGenPath)
         if (!dir.exists()) dir.mkdirs()
-
+        
         projectPath = srcGenPath + File.separator + filename
         dir = new File(projectPath)
         if (!dir.exists()) dir.mkdirs()
-                
+        
+        // Collect string IDs from reactors and triggers
         reactorIDs = getReactorIDs()
         triggerIDs = getTriggerIDs()
         reactorIDsWithStartups = getReactorIDsWithStartups()
         
-        /***************************
-         ***   Generate files    ***
-         ***************************/
-        println("Generating common.ucl")
-        generateCommon()
+        // Collect specifications from the main preamble
+        var defn = this.mainDef.reactorClass.toDefinition
+        specs = new ArrayList<String>();
+        for (p : defn.preambles ?: emptyList) {
+            // println(p.code.toText.split("\\r?\\n"))
+            for (s : p.code.toText.split("\\r?\\n")) {
+                specs.add(s)
+            }
+        }
+        for (p : specs) {
+            println(p)   
+        }
         
-        println("Generating pqueue.ucl")
-        generatePQueue()
-        
-        println("Generating scheduler.ucl")
-        generateScheduler()
-        
-        println("Generating reactor.ucl")
-        generateReactor()
-        
-        println("Generating main.ucl")
-        generateMain()
-        
-        println("Generating run.sh")
-        generateDriver()
+        // Generate UCLID files for each specification
+        // TODO: dependency analysis. See if the reactors
+        // involved in the specification can be executed
+        // concurrently.
+        for (i : 0 ..< specs.length - 1) {
+            // Create a directory for the spec
+            var propPath = projectPath + File.separator + i
+            dir = new File(propPath)
+            if (!dir.exists()) dir.mkdirs()
+            
+            // Determine the appropriate semantics for this spec
+            // Generate UCLID files for the specification
+            // TODO: use a separate parser to generate AST
+            // for the spec to dynamically generate models
+            if (isConcurrentSpec(specs.get(i))) {
+                generateConcurrentModel(propPath, specs.get(i))
+            } else {
+                println("Spec " + i + " is not a concurrent spec!")
+                generateInterleavingModel(propPath, specs.get(i))
+            }
+        }
     }
     
     /** Write the source code to file */
@@ -230,7 +220,7 @@ class UclidGenerator extends GeneratorBase {
         return arr
     }
     
-    protected def generateCommon(){ 
+    protected def generateCommon(String path){ 
         code = new StringBuilder()
         val commonFilename = "common.ucl"
         val reactorIdStr = String.join(', ', reactorIDs)
@@ -316,10 +306,10 @@ class UclidGenerator extends GeneratorBase {
          
         ''')
         
-        writeSourceCodeToFile(getCode().getBytes(), projectPath + File.separator + commonFilename)
+        writeSourceCodeToFile(getCode().getBytes(), path + File.separator + commonFilename)
     }
     
-    protected def generatePQueue(){
+    protected def generatePQueue(String path){
         code = new StringBuilder()
         val pqueueFilename = "pqueue.ucl"
         val startupTriggerIDs = getStartupTriggerIDs
@@ -624,14 +614,14 @@ class UclidGenerator extends GeneratorBase {
         
         ''')
         
-        writeSourceCodeToFile(getCode().getBytes(), projectPath + File.separator + pqueueFilename)
+        writeSourceCodeToFile(getCode().getBytes(), path + File.separator + pqueueFilename)
     }
     
     protected def String getReactorFromTrigger(String t) {
         return t.split('_').get(0)
     }
     
-    protected def generateScheduler(){
+    protected def generateScheduler(String path){
         code = new StringBuilder()
         val schedulerFilename = "scheduler.ucl"
         
@@ -684,24 +674,6 @@ class UclidGenerator extends GeneratorBase {
             );
         ''')
         
-        // Generate finalized table helper
-        /*
-        pr('''
-            define get(q : final_tb_t, i : integer) : boolean
-            = if (i == 1) then q._1 else
-                (if (i == 2) then q._2 else
-                    (if (i == 3) then q._3 else
-                        false));
-            
-            define set(q : final_tb_t, i : integer, v : boolean) : final_tb_t
-            = if (i == 1) then {v, q._2, q._3} else
-                (if (i == 2) then {q._1, v, q._3} else
-                    (if (i == 3) then {q._1, q._2, v} else
-                         q));
-             
-        ''')
-        */
-        
         pr('''
             define get(q : final_tb_t, i : integer) : boolean =
             «FOR i : 0 ..< triggerIDs.length»
@@ -720,20 +692,6 @@ class UclidGenerator extends GeneratorBase {
             «ENDFOR»
             q«FOR i : 0 ..< triggerIDs.length»)«ENDFOR»;
         ''')
-        
-        /*
-        pr('''
-            // ******** Finalized REACTION table
-            var finalized : final_tb_t;
-            var f_counter : integer;
-            input finalize_Source_startup : boolean;
-            input finalize_A_in : boolean;
-            input finalize_B_in : boolean;
-            output final_to_Source : final_tb_t;
-            output final_to_A : final_tb_t;
-            output final_to_B : final_tb_t;
-        ''')
-        */
         
         pr('''
             // Set up finalized trigger table
@@ -933,10 +891,10 @@ class UclidGenerator extends GeneratorBase {
         }        
         ''')
         
-        writeSourceCodeToFile(getCode().getBytes(), projectPath + File.separator + schedulerFilename)
+        writeSourceCodeToFile(getCode().getBytes(), path + File.separator + schedulerFilename)
     }
     
-    protected def generateReactor() {
+    protected def generateReactor(String path) {
         code = new StringBuilder()
         val schedulerFilename = "reactor.ucl"
         var String rxn_postfix
@@ -1220,10 +1178,10 @@ class UclidGenerator extends GeneratorBase {
             pr('}')
         }
         
-        writeSourceCodeToFile(getCode().getBytes(), projectPath + File.separator + schedulerFilename)
+        writeSourceCodeToFile(getCode().getBytes(), path + File.separator + schedulerFilename)
     }
     
-    protected def generateMain() {
+    protected def generateMain(String path, String spec) {
         code = new StringBuilder()
         val schedulerFilename = "main.ucl"
         
@@ -1347,10 +1305,13 @@ class UclidGenerator extends GeneratorBase {
         ''')
         
         // Get properties from the main preamble
+        /*
         var defn = this.mainDef.reactorClass.toDefinition
         for (p : defn.preambles ?: emptyList) {
             pr(p.code.toText)
         }
+        */
+        pr(spec)
         
         pr('''
         control {
@@ -1393,10 +1354,10 @@ class UclidGenerator extends GeneratorBase {
         
         pr('}')
         
-        writeSourceCodeToFile(getCode().getBytes(), projectPath + File.separator + schedulerFilename)
+        writeSourceCodeToFile(getCode().getBytes(), path + File.separator + schedulerFilename)
     }
     
-    protected def generateDriver() {
+    protected def generateDriver(String path) {
         code = new StringBuilder()
         val schedulerFilename = "run.sh"
         
@@ -1404,7 +1365,45 @@ class UclidGenerator extends GeneratorBase {
         uclid common.ucl pqueue.ucl scheduler.ucl reactor.ucl main.ucl
         ''')
         
-        writeSourceCodeToFile(getCode().getBytes(), projectPath + File.separator + schedulerFilename)
+        writeSourceCodeToFile(getCode().getBytes(), path + File.separator + schedulerFilename)
+    }
+    
+    protected def generateInterleavingModel(String path, String spec) {
+        println("Generating common.ucl")
+        generateCommon(path)
+        
+        println("Generating pqueue.ucl")
+        generatePQueue(path)
+        
+        println("Generating scheduler.ucl")
+        generateScheduler(path)
+        
+        println("Generating reactor.ucl")
+        generateReactor(path)
+        
+        println("Generating main.ucl")
+        generateMain(path, spec)
+        
+        println("Generating run.sh")
+        generateDriver(path)
+    }
+    
+    protected def generateConcurrentModel(String path, String spec) {
+        println("TODO!")
+    }
+    
+    protected def isConcurrentSpec(String spec) {
+        return concurrentPattern.matcher(spec).find()
+        /*
+        println("===")
+        println(spec)
+        println(spec.matches("^concurrent"))
+        println(spec.matches("^(concurrent).*"))
+        println(spec.matches("c.*"))
+        println(spec.matches(".*xxxxxxxxxxxx.*"))
+        println(concurrentPattern.matcher(spec).find())
+        return spec.matches("^concurrent")
+        */
     }
     
     override generateDelayBody(Action action, VarRef port) {
@@ -1442,5 +1441,4 @@ class UclidGenerator extends GeneratorBase {
     override getTargetVariableSizeListType(String baseType) {
         throw new UnsupportedOperationException("TODO: auto-generated method stub")
     }
-    
 }
