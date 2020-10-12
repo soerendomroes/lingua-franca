@@ -6,7 +6,6 @@ import java.io.File
 import java.io.FileOutputStream
 import java.util.ArrayList
 import java.util.LinkedList
-import java.util.regex.Matcher
 import java.util.regex.Pattern
 import org.eclipse.emf.ecore.resource.Resource
 import org.eclipse.xtext.generator.IFileSystemAccess2
@@ -23,43 +22,43 @@ class UclidGenerator extends GeneratorBase {
     //// Private variables
     
     // Set of acceptable import targets includes only C.
-    val acceptableTargetSet = newHashSet('UCLID')
+    // val acceptableTargetSet = newHashSet('UCLID')
 
     // List of deferred assignments to perform in initialize_trigger_objects.
     // FIXME: Remove this and InitializeRemoteTriggersTable
-    var deferredInitialize = new LinkedList<InitializeRemoteTriggersTable>()
+    // var deferredInitialize = new LinkedList<InitializeRemoteTriggersTable>()
     
     // Place to collect code to initialize the trigger objects for all reactor instances.
-    var initializeTriggerObjects = new StringBuilder()
+    // var initializeTriggerObjects = new StringBuilder()
 
     // Place to collect code to go at the end of the __initialize_trigger_objects() function.
-    var initializeTriggerObjectsEnd = new StringBuilder()
+    // var initializeTriggerObjectsEnd = new StringBuilder()
 
     // The command to run the generated code if specified in the target directive.
-    var runCommand = new ArrayList<String>()
+    // var runCommand = new ArrayList<String>()
 
     // Place to collect shutdown action instances.
-    var shutdownActionInstances = new LinkedList<ActionInstance>()
+    // var shutdownActionInstances = new LinkedList<ActionInstance>()
 
     // Place to collect code to execute at the start of a time step.
-    var startTimeStep = new StringBuilder()
+    // var startTimeStep = new StringBuilder()
     
     /** Count of the number of is_present fields of the self struct that
      *  need to be reinitialized in __start_time_step().
      */
-    var startTimeStepIsPresentCount = 0
+    // var startTimeStepIsPresentCount = 0
     
     /** Count of the number of token pointers that need to have their
      *  reference count decremented in __start_time_step().
      */
-    var startTimeStepTokens = 0
+    // var startTimeStepTokens = 0
 
     // Place to collect code to initialize timers for all reactors.
-    protected var startTimers = new StringBuilder()
-    var startTimersCount = 0
+    // protected var startTimers = new StringBuilder()
+    // var startTimersCount = 0
 
     // For each reactor, we collect a set of input and parameter names.
-    var triggerCount = 0
+    // var triggerCount = 0
     
     // Building strings that are shared across generator functions
     // FIXME: extract reactor and trigger info
@@ -110,8 +109,9 @@ class UclidGenerator extends GeneratorBase {
         var defn = this.mainDef.reactorClass.toDefinition
         specs = new ArrayList<String>();
         for (p : defn.preambles ?: emptyList) {
+            // No longer split by line
             // println(p.code.toText.split("\\r?\\n"))
-            for (s : p.code.toText.split("\\r?\\n")) {
+            for (s : p.code.toText.split(";")) {
                 specs.add(s)
             }
         }
@@ -131,13 +131,16 @@ class UclidGenerator extends GeneratorBase {
             
             // Determine the appropriate semantics for this spec
             // Generate UCLID files for the specification
+            var specIsConcurrent = isConcurrentSpec(specs.get(i))
             // TODO: use a separate parser to generate AST
             // for the spec to dynamically generate models
-            if (isConcurrentSpec(specs.get(i))) {
-                generateConcurrentModel(propPath, specs.get(i))
+            var targetSpec = generateTargetSpec(this.targetCompiler, specs.get(i))
+            println("Spec is " + targetSpec)
+            
+            if (specIsConcurrent) {
+                generateConcurrentModel(propPath, targetSpec)
             } else {
-                println("Spec " + i + " is not a concurrent spec!")
-                generateInterleavingModel(propPath, specs.get(i))
+                generateInterleavingModel(propPath, targetSpec)
             }
         }
     }
@@ -210,6 +213,10 @@ class UclidGenerator extends GeneratorBase {
         return t.split("_", 2).get(1)
     }
     
+    protected def String getReactorFromTrigger(String t) {
+        return t.split('_').get(0)
+    }
+    
     protected def ArrayList<String> getStartupTriggerIDs() {
         var arr = new ArrayList<String>
         for (t : triggerIDs) {
@@ -220,7 +227,52 @@ class UclidGenerator extends GeneratorBase {
         return arr
     }
     
-    protected def generateCommon(String path){ 
+    protected def generateInterleavingModel(String path, String spec) {
+        generateCommonInt(path)        
+        generatePQueueInt(path)
+        generateSchedulerInt(path)
+        generateReactorInt(path)
+        generateMainInt(path, spec)
+        generateDriverInt(path)
+        
+        println("Interleaving model generated for spec: " + spec)
+    }
+    
+    protected def generateConcurrentModel(String path, String spec) {
+        
+        println("Concurrent model generated for spec: " + spec)
+    }
+    
+    protected def boolean isConcurrentSpec(String spec) {
+        return concurrentPattern.matcher(spec).find()
+    }
+    
+    
+    ////////////////////////////////////////////////////
+    //// Spec translators for each verification platform
+    
+    protected def String generateTargetSpec(String target, String spec) {
+        switch target {
+            case 'uclid' : generateUclidSpec(spec)
+            default : {
+                throw new UnsupportedOperationException("Target " + target + " not supported.")
+            }
+        }
+    }
+    
+    // TODO: Investigate whether an AST based solution is needed
+    protected def String generateUclidSpec(String spec) {
+        var li = spec.split(":")
+        var pre = li.get(0).split(" ")
+        var name = pre.get(pre.size - 1)
+        var prop = li.get(1)
+        return "property[LTL] " + name + ": " + "!F( " + prop + " );"
+    }
+    
+    //////////////////////////////////////////////////
+    //// Model generators under interleaving semantics.
+    
+    protected def generateCommonInt(String path){ 
         code = new StringBuilder()
         val commonFilename = "common.ucl"
         val reactorIdStr = String.join(', ', reactorIDs)
@@ -309,7 +361,7 @@ class UclidGenerator extends GeneratorBase {
         writeSourceCodeToFile(getCode().getBytes(), path + File.separator + commonFilename)
     }
     
-    protected def generatePQueue(String path){
+    protected def generatePQueueInt(String path){
         code = new StringBuilder()
         val pqueueFilename = "pqueue.ucl"
         val startupTriggerIDs = getStartupTriggerIDs
@@ -617,11 +669,7 @@ class UclidGenerator extends GeneratorBase {
         writeSourceCodeToFile(getCode().getBytes(), path + File.separator + pqueueFilename)
     }
     
-    protected def String getReactorFromTrigger(String t) {
-        return t.split('_').get(0)
-    }
-    
-    protected def generateScheduler(String path){
+    protected def generateSchedulerInt(String path){
         code = new StringBuilder()
         val schedulerFilename = "scheduler.ucl"
         
@@ -894,7 +942,7 @@ class UclidGenerator extends GeneratorBase {
         writeSourceCodeToFile(getCode().getBytes(), path + File.separator + schedulerFilename)
     }
     
-    protected def generateReactor(String path) {
+    protected def generateReactorInt(String path) {
         code = new StringBuilder()
         val schedulerFilename = "reactor.ucl"
         var String rxn_postfix
@@ -1181,7 +1229,7 @@ class UclidGenerator extends GeneratorBase {
         writeSourceCodeToFile(getCode().getBytes(), path + File.separator + schedulerFilename)
     }
     
-    protected def generateMain(String path, String spec) {
+    protected def generateMainInt(String path, String spec) {
         code = new StringBuilder()
         val schedulerFilename = "main.ucl"
         
@@ -1357,7 +1405,7 @@ class UclidGenerator extends GeneratorBase {
         writeSourceCodeToFile(getCode().getBytes(), path + File.separator + schedulerFilename)
     }
     
-    protected def generateDriver(String path) {
+    protected def generateDriverInt(String path) {
         code = new StringBuilder()
         val schedulerFilename = "run.sh"
         
@@ -1368,43 +1416,14 @@ class UclidGenerator extends GeneratorBase {
         writeSourceCodeToFile(getCode().getBytes(), path + File.separator + schedulerFilename)
     }
     
-    protected def generateInterleavingModel(String path, String spec) {
-        println("Generating common.ucl")
-        generateCommon(path)
-        
-        println("Generating pqueue.ucl")
-        generatePQueue(path)
-        
-        println("Generating scheduler.ucl")
-        generateScheduler(path)
-        
-        println("Generating reactor.ucl")
-        generateReactor(path)
-        
-        println("Generating main.ucl")
-        generateMain(path, spec)
-        
-        println("Generating run.sh")
-        generateDriver(path)
-    }
     
-    protected def generateConcurrentModel(String path, String spec) {
-        println("TODO!")
-    }
+    /////////////////////////////////////////////////
+    //// Model generators under concurrent semantics.
     
-    protected def isConcurrentSpec(String spec) {
-        return concurrentPattern.matcher(spec).find()
-        /*
-        println("===")
-        println(spec)
-        println(spec.matches("^concurrent"))
-        println(spec.matches("^(concurrent).*"))
-        println(spec.matches("c.*"))
-        println(spec.matches(".*xxxxxxxxxxxx.*"))
-        println(concurrentPattern.matcher(spec).find())
-        return spec.matches("^concurrent")
-        */
-    }
+    
+    
+    /////////////////////////////////////////////////
+    //// Functions from generatorBase
     
     override generateDelayBody(Action action, VarRef port) {
         throw new UnsupportedOperationException("TODO: auto-generated method stub")
