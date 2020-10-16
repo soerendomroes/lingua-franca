@@ -358,6 +358,11 @@ abstract class GeneratorBase extends AbstractLinguaFrancaValidator {
      * The tracing target parameter, or false if there is none.
      */
     protected boolean targetTracing = false
+    
+    /**
+     * The number of steps checked in model checking 
+     */
+    protected int targetModelCheckingSteps
 
     ////////////////////////////////////////////
     //// Private fields.
@@ -366,6 +371,7 @@ abstract class GeneratorBase extends AbstractLinguaFrancaValidator {
      * Map from builder to its current indentation.
      */
     var indentation = new HashMap<StringBuilder, String>()
+
     
 
     ////////////////////////////////////////////
@@ -440,6 +446,14 @@ abstract class GeneratorBase extends AbstractLinguaFrancaValidator {
                     case "tracing":
                         if (param.value.literal == 'true') {
                             targetTracing = true
+                        }
+                    // FIXME: separate UCLID specific properties from the general properties
+                    case "bmc":
+                        if (param.value.literal !== null) {
+                            targetModelCheckingSteps = Integer.decode(param.value.literal)
+                        }
+                        else {
+                            targetModelCheckingSteps = 1 
                         }
                 }
             }

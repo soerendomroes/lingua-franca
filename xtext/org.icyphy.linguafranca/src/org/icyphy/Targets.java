@@ -457,7 +457,12 @@ public enum Targets {
         /**
          * Directive to let the runtime produce execution traces.
          */
-        TRACING("tracing", Arrays.asList(Targets.CPP));
+        TRACING("tracing", Arrays.asList(Targets.CPP)),
+        
+        /**
+         * Directive for specifying the number of steps to check in model checking.
+         */
+        BMC("bmc", Arrays.asList(Targets.UCLID));
 
         /**
          * List of targets that support this property. If a property is used for

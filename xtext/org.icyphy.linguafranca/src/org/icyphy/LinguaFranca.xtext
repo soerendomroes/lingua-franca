@@ -347,10 +347,12 @@ Literal:
 // Terminals must be mutually exclusive. They are used by the lexer before parsing.
 
 @Override
-terminal SL_COMMENT: ('//' | '#') !('\n'|'\r')* ('\r'? '\n')?;
+terminal SL_COMMENT: ('//') !('\n'|'\r')* ('\r'? '\n')?;
 
 @Override
 terminal ML_COMMENT: ('/*' -> '*/') | ('\'\'\'' -> '\'\'\'');
+
+terminal VERIFICATION: ('@') !('\n'|'\r')* ('\r'? '\n')?;
 
 Kebab: ID('-'ID)*;
 
@@ -437,7 +439,7 @@ Body:
 // the end of a target-code segment.
 Token:
     // Imported terminals
-    ID | INT | STRING | ML_COMMENT | SL_COMMENT | WS | ANY_OTHER | 
+    ID | INT | STRING | ML_COMMENT | SL_COMMENT | VERIFICATION | WS | ANY_OTHER | 
     // Keywords
     'target' | 'import' | 'main' | 'realtime' | 'reactor' | 'state' | 'time' | 
     'mutable' | 'input' | 'output' | 'timer' | 'action' | 'reaction' | 
