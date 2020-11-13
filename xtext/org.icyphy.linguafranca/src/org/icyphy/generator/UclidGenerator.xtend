@@ -90,7 +90,7 @@ class UclidGenerator extends GeneratorBase {
     // FIXME: extract reactor and trigger info
     var ArrayList<String> reactorIDs
     var ArrayList<String> triggerIDs
-    var ArrayList<String> reactorIDsWithStartups
+    var ArrayList<String> startupReactorIDs
     var ArrayList<String> specs
     
     // Path to the generated project directory
@@ -126,31 +126,27 @@ class UclidGenerator extends GeneratorBase {
         dir = new File(projectPath)
         if (!dir.exists()) dir.mkdirs()
         
+        // FIXME: use a tuple to store the string ID and a reference to reactor
         // Collect string IDs from reactors and triggers
         reactorIDs = getReactorIDs()
         triggerIDs = getTriggerIDs()
-        reactorIDsWithStartups = getReactorIDsWithStartups()
+        startupReactorIDs = getStartupReactorClasses()
         
         // Collect specifications from the main preamble
         var defn = this.mainDef.reactorClass.toDefinition
         specs = new ArrayList<String>();
         for (p : defn.preambles ?: emptyList) {
-            // No longer split by line
-            // println(p.code.toText.split("\\r?\\n"))
-            for (s : p.code.toText.split(";")) {
-                specs.add(s)
+            var _s = p.code.toText.split(";")
+            for (i : 0 ..< _s.length - 1) {
+                specs.add(_s.get(i))
             }
         }
-        /*
-        for (p : specs) {
-            println(p)   
-        }
-        */
         
         // Generate UCLID files for each specification
         // TODO: dependency analysis. See if the reactors
         // involved in the specification can be executed
         // concurrently.
+        /*
         for (i : 0 ..< specs.length - 1) {
             // Create a directory for the spec
             var propPath = projectPath + File.separator + i
@@ -171,6 +167,10 @@ class UclidGenerator extends GeneratorBase {
                 generateInterleavingModel(propPath, targetSpec)
             }
         }
+        */
+        
+        var targetSpecs = generateTargetSpecs(this.targetCompiler, specs)
+        generateModel(projectPath, targetSpecs)
     }
     
     /** Write the source code to file */
@@ -186,21 +186,8 @@ class UclidGenerator extends GeneratorBase {
     protected def ArrayList<String> getReactorIDs() {
         var reactorIDs = new ArrayList<String>();
         for (r : reactors) {
-            reactorIDs.add(r.name)
-        }
-        return reactorIDs
-    }
-    
-    // Returns a list of reactors that have startup actions
-    protected def ArrayList<String> getReactorIDsWithStartups() {
-        var reactorIDs = new ArrayList<String>();
-        for (r : reactors) {
-            for (rxn : r.getReactions()) {
-                for (t : rxn.getTriggers) {
-                    if (t.isStartup()) {
-                        reactorIDs.add(r.name)
-                    }
-                }
+            for (i : this.instantiationGraph.getInstantiations(r)) {
+                reactorIDs.add(r.name + '_' + i.name)
             }
         }
         return reactorIDs
@@ -233,18 +220,34 @@ class UclidGenerator extends GeneratorBase {
         return arr
     }
     
+    // FIXME: remove this. This is not true.
     protected def String getReactorInstanceID(String r) {
         return '__' + r.toLowerCase() + '__'
     }
     
-    protected def String getVarIDfromTriggerID(String t) {
-        return t.split("_", 2).get(1)
+    protected def String getReactorFromReactorID(String r) {
+        return r.split('_').get(0)
+    }
+    
+    protected def String getVarNamefromID(String t) {
+        return t.split('_', 2).get(1)
     }
     
     protected def String getReactorFromTrigger(String t) {
         return t.split('_').get(0)
     }
     
+    protected def ArrayList<String> getReactorIDsFromReactor(String s) {
+        var li = new ArrayList<String>
+        for (r : reactorIDs) {
+            if (r.startsWith(s + '_')) {
+                li.add(r)
+            }
+        }
+        return li
+    }
+    
+    /*
     protected def ArrayList<String> getStartupTriggerIDs() {
         var arr = new ArrayList<String>
         for (t : triggerIDs) {
@@ -254,7 +257,68 @@ class UclidGenerator extends GeneratorBase {
         }
         return arr
     }
+    */
     
+    
+    // Returns a list of reactors that have startup actions
+    /*
+    protected def ArrayList<String> getstartupReactorIDs() {
+        var reactorIDs = new ArrayList<String>();
+        for (r : reactors) {
+            for (i : this.instantiationGraph.getInstantiations(r)) {
+                for (rxn : r.getReactions()) {
+                    for (t : rxn.getTriggers) {
+                        if (t.isStartup()) {
+                            reactorIDs.add(r.name + '_' + i.name)
+                        }
+                    }
+                }
+            }
+        }
+        return reactorIDs
+    }
+    */
+    
+    protected def ArrayList<String> getStartupReactorClasses() {
+        var arr = new ArrayList<String>
+        for (t : triggerIDs) {
+            if (t.endsWith('_startup')) {
+                var reactorClass = getReactorFromTrigger(t)
+                var rIDs = getReactorIDsFromReactor(reactorClass)
+                for (id : rIDs) {
+                    arr.add(getReactorFromReactorID(id))
+                }
+            }
+        }
+        return arr
+    }
+    
+    protected def ArrayList<Pair<String, String>> getStartupReactorIDsAndTriggers() {
+        var arr = new ArrayList<Pair<String, String>>
+        for (t : triggerIDs) {
+            if (t.endsWith('_startup')) {
+                var reactorClass = getReactorFromTrigger(t)
+                var rIDs = getReactorIDsFromReactor(reactorClass)
+                for (id : rIDs) {
+                    arr.add(new Pair(id, t))
+                }
+            }
+        }
+        return arr
+    }
+    
+    protected def generateModel(String path, ArrayList<String> specs) {
+        generateCommon(path)        
+        generatePQueue(path)
+        generateScheduler(path)
+        generateReactor(path)
+        generateMain(path, specs)
+        generateDriver(path)
+        
+        println("Model generation has completed.")
+    }
+    
+    /*
     protected def generateInterleavingModel(String path, String spec) {
         generateCommonInterleaving(path)        
         generatePQueueInterleaving(path)
@@ -277,10 +341,19 @@ class UclidGenerator extends GeneratorBase {
     protected def boolean isConcurrentSpec(String spec) {
         return concurrentPattern.matcher(spec).find()
     }
+    */
     
     
     ////////////////////////////////////////////////////
     //// Spec translators for each verification platform
+    protected def ArrayList<String> generateTargetSpecs(String target, ArrayList<String> specs) {
+        var sp = new ArrayList<String>
+        for (s : specs) {
+            sp.add(generateTargetSpec(target, s))
+        }
+        return sp
+    }
+    
     protected def String generateTargetSpec(String target, String spec) {
         switch target {
             case 'uclid' : generateUclidSpec(spec)
@@ -321,12 +394,6 @@ class UclidGenerator extends GeneratorBase {
         var delims = "[,()]+";
         var li = line.split(delims)
         
-        /*
-        for (l : li) {
-            println(l)
-        }
-        */
-        
         var port = li.get(1).strip()
         var v = li.get(2).strip()
         
@@ -346,7 +413,7 @@ class UclidGenerator extends GeneratorBase {
     //////////////////////////////////////////////////
     //// Model generators under interleaving semantics.
     
-    protected def generateCommonInterleaving(String path){ 
+    protected def generateCommon(String path){ 
         code = new StringBuilder()
         val filename = "common.ucl"
         val reactorIdStr = String.join(', ', reactorIDs)
@@ -429,16 +496,15 @@ class UclidGenerator extends GeneratorBase {
                         get(q._1, q._2)}
               else {q, { -1, NULL, NULL, NULL_NULL, -1, false }};
         }
-         
         ''')
         
         writeSourceCodeToFile(getCode().getBytes(), path + File.separator + filename)
     }
     
-    protected def generatePQueueInterleaving(String path){
+    protected def generatePQueue(String path){
         code = new StringBuilder()
         val filename = "pqueue.ucl"
-        val startupTriggerIDs = getStartupTriggerIDs
+        val startupArr = getStartupReactorIDsAndTriggers
         
         // FIXME: assign levels => reference to levels in LF.
         val reactorInstances = new ArrayList
@@ -753,12 +819,12 @@ class UclidGenerator extends GeneratorBase {
                 /********************************
                  * File specific: startup actions
                  ********************************/
-                count = «startupTriggerIDs.length»;
-                «FOR i : 0 ..< startupTriggerIDs.length»
+                count = «startupArr.length»;
+                «FOR i : 0 ..< startupArr.length»
                 contents._«i + 1» = { 0, 
-                                    «getReactorFromTrigger(startupTriggerIDs.get(i))», 
-                                    «getReactorFromTrigger(startupTriggerIDs.get(i))»,
-                                    «startupTriggerIDs.get(i)», 
+                                    «startupArr.get(i).getKey», 
+                                    «startupArr.get(i).getKey»,
+                                    «startupArr.get(i).getValue», 
                                     0, true };
                 «ENDFOR»
             }
@@ -781,7 +847,7 @@ class UclidGenerator extends GeneratorBase {
         writeSourceCodeToFile(getCode().getBytes(), path + File.separator + filename)
     }
     
-    protected def generateSchedulerInterleaving(String path){
+    protected def generateScheduler(String path){
         code = new StringBuilder()
         val filename = "scheduler.ucl"
         
@@ -818,10 +884,10 @@ class UclidGenerator extends GeneratorBase {
         // FIXME: generate input/output variables
         pr('''
             «FOR r : reactorIDs»
-                input «r»_to_S : event_t;
+                input «getVarNamefromID(r)»_to_S : event_t;
             «ENDFOR»
             «FOR r : reactorIDs»
-                output S_to_«r» : event_t;
+                output S_to_«getVarNamefromID(r)» : event_t;
             «ENDFOR»
         ''')
         
@@ -829,7 +895,7 @@ class UclidGenerator extends GeneratorBase {
             define has_available_event() : boolean
             = (
                 «FOR i : 0 ..< reactorIDs.length»
-                    «IF i != 0»||«ENDIF» is_present(«reactorIDs.get(i)»_to_S)
+                    «IF i != 0»||«ENDIF» is_present(«getVarNamefromID(reactorIDs.get(i))»_to_S)
                 «ENDFOR»
             );
         ''')
@@ -889,6 +955,15 @@ class UclidGenerator extends GeneratorBase {
             // The current clock value
             var t : instant_t;
         ''')
+        
+        // Portmap for determining destination and trigger
+        /*
+        pr('''
+            // Portmaps
+            var port_to_dest : [output_id_t]reactor_id_t;
+            var port_to_trigger : [output_id_t]trigger_id_t;
+        ''')
+        */
         
         // FIXME: change how reaction is determined. Use an explicit
         // field in the event definition.
@@ -963,7 +1038,7 @@ class UclidGenerator extends GeneratorBase {
         
                 // File specific: init outputs
                 «FOR i : 0 ..< reactorIDs.length»
-                S_to_«reactorIDs.get(i)» = NULL_EVENT;
+                S_to_«getVarNamefromID(reactorIDs.get(i))» = NULL_EVENT;
                 «ENDFOR»
         
                 // File specific: init finalization table
@@ -989,9 +1064,9 @@ class UclidGenerator extends GeneratorBase {
                     // File specific: select an available event to push
                     case
                         «FOR i : 0 ..< reactorIDs.length»
-                        (is_present(«reactorIDs.get(i)»_to_S)) : {
+                        (is_present(«getVarNamefromID(reactorIDs.get(i))»_to_S)) : {
                             call (eq_op', eq_data', rq_op', rq_data')
-                                = push_event(«reactorIDs.get(i)»_to_S);
+                                = push_event(«getVarNamefromID(reactorIDs.get(i))»_to_S);
                         }
                         «ENDFOR»
                     esac
@@ -1020,7 +1095,7 @@ class UclidGenerator extends GeneratorBase {
                 
                 // File specific: distribute events to appropriate reactors
                 «FOR i : 0 ..< reactorIDs.length»
-                S_to_«reactorIDs.get(i)»' = get_event_dest(
+                S_to_«getVarNamefromID(reactorIDs.get(i))»' = get_event_dest(
                                                 get_event_present(rq_out', eq_out'),
                                                 «reactorIDs.get(i)»
                                             );
@@ -1054,7 +1129,7 @@ class UclidGenerator extends GeneratorBase {
         writeSourceCodeToFile(getCode().getBytes(), path + File.separator + filename)
     }
     
-    protected def generateReactorInterleaving(String path) {
+    protected def generateReactor(String path) {
         code = new StringBuilder()
         val filename = "reactor.ucl"
         var String rxn_postfix
@@ -1102,7 +1177,7 @@ class UclidGenerator extends GeneratorBase {
                 «FOR v : r.getActions»
                     var «v.name» : event_t;
                 «ENDFOR»
-                «IF reactorIDsWithStartups.contains(r.name)»
+                «IF startupReactorIDs.contains(r.name)»
                     var startup : event_t;
                 «ENDIF»
             ''')
@@ -1299,7 +1374,7 @@ class UclidGenerator extends GeneratorBase {
                     «FOR v : r.getActions»
                         «v.name» = NULL_EVENT;
                     «ENDFOR»
-                    «IF reactorIDsWithStartups.contains(r.name)»
+                    «IF startupReactorIDs.contains(r.name)»
                         startup = NULL_EVENT;
                     «ENDIF»
                     
@@ -1318,7 +1393,7 @@ class UclidGenerator extends GeneratorBase {
                         case
                             «FOR t : getReactorTriggerIDs(r.name)»
                             (__in__._4 == «t») : {
-                                «getVarIDfromTriggerID(t)»' = __in__;
+                                «getVarNamefromID(t)»' = __in__;
                             }
                             «ENDFOR»
                         esac
@@ -1343,7 +1418,7 @@ class UclidGenerator extends GeneratorBase {
                     else {
                         // File specific: trigger reaction
                         case
-                            «IF reactorIDsWithStartups.contains(r.name)»
+                            «IF startupReactorIDs.contains(r.name)»
                                 (is_present(startup)) : {
                                     call () = rxn_startup();
                                 }
@@ -1375,7 +1450,7 @@ class UclidGenerator extends GeneratorBase {
         writeSourceCodeToFile(getCode().getBytes(), path + File.separator + filename)
     }
     
-    protected def generateMainInterleaving(String path, String spec) {
+    protected def generateMain(String path, ArrayList<String> specs) {
         code = new StringBuilder()
         val filename = "main.ucl"
         
@@ -1399,12 +1474,12 @@ class UclidGenerator extends GeneratorBase {
             
             // Reactors to scheduler
             «FOR r : reactorIDs»
-            var «r»_to_S : event_t;
+            var «getVarNamefromID(r)»_to_S : event_t;
             «ENDFOR»
             
             // Scheduler to reactors
             «FOR r : reactorIDs»
-            var S_to_«r» : event_t;
+            var S_to_«getVarNamefromID(r)» : event_t;
             «ENDFOR»
             
             // Finalized reaction indicator
@@ -1423,10 +1498,10 @@ class UclidGenerator extends GeneratorBase {
         pr('''
         instance scheduler : Scheduler(
             «FOR r : reactorIDs»
-            «r»_to_S : («r»_to_S),
+            «getVarNamefromID(r)»_to_S : («getVarNamefromID(r)»_to_S),
             «ENDFOR»
             «FOR r : reactorIDs»
-            S_to_«r» : (S_to_«r»),
+            S_to_«getVarNamefromID(r)» : (S_to_«getVarNamefromID(r)»),
             «ENDFOR»
             «FOR t : triggerIDs»
             finalize_«t» : (finalize_«t»),
@@ -1440,19 +1515,21 @@ class UclidGenerator extends GeneratorBase {
         // Generate reactor instances
         // FIXME: move decl name collection to top-level doGenerate
         //        support multiple declarations of the same reactor
+        /*
         val reactorDeclNames = new ArrayList<String>
         for (r : reactors) {
             for (i : this.instantiationGraph.getInstantiations(r)) {
                 reactorDeclNames.add(i.name)
             }
         }
+        */
         for (i : 0 ..< reactorIDs.length) {
-            var triggers = getReactorTriggerIDs(reactorIDs.get(i))
+            var triggers = getReactorTriggerIDs(getReactorFromReactorID(reactorIDs.get(i)))
             pr('''
-                instance «reactorDeclNames.get(i)» : Reactor_«reactorIDs.get(i)»(
+                instance «getVarNamefromID(reactorIDs.get(i))» : Reactor_«getReactorFromReactorID(reactorIDs.get(i))»(
                     t : (scheduler.t),
-                    __in__ : (S_to_«reactorIDs.get(i)»),
-                    __out__ : («reactorIDs.get(i)»_to_S),
+                    __in__ : (S_to_«getVarNamefromID(reactorIDs.get(i))»),
+                    __out__ : («getVarNamefromID(reactorIDs.get(i))»_to_S),
                     finalized : (final_to_«reactorIDs.get(i)»),
                     «FOR j : 0 ..< triggers.length»
                     finalize_«triggers.get(j)» : (finalize_«triggers.get(j)»)«IF j != triggers.length - 1»,«ENDIF»
@@ -1467,12 +1544,12 @@ class UclidGenerator extends GeneratorBase {
             
             // Reactors to scheduler
             «FOR r : reactorIDs»
-            «r»_to_S = NULL_EVENT;
+            «getVarNamefromID(r)»_to_S = NULL_EVENT;
             «ENDFOR»
             
             // Scheduler to reactors
             «FOR r : reactorIDs»
-            S_to_«r» = NULL_EVENT;
+            S_to_«getVarNamefromID(r)» = NULL_EVENT;
             «ENDFOR»
             
             // Finalized reaction indicator
@@ -1492,16 +1569,18 @@ class UclidGenerator extends GeneratorBase {
         pr('''
         next {
             next(scheduler);
-            «FOR i : 0 ..< reactorDeclNames.length»
-            next(«reactorDeclNames.get(i)»);
+            «FOR r : reactorIDs»
+            next(«getVarNamefromID(r)»);
             «ENDFOR»
         }
         ''')
         
         // Insert property
         pr('''
-            // Key property
-            «spec»
+            // LTL Properties
+            «FOR s : specs»
+                «s»
+            «ENDFOR»
         ''')
         
         pr('''
@@ -1526,16 +1605,16 @@ class UclidGenerator extends GeneratorBase {
                 scheduler.rq_data,
                 scheduler.rq_out,
                 «FOR r : reactorIDs»
-                scheduler.S_to_«r»,
+                scheduler.S_to_«getVarNamefromID(r)»,
                 «ENDFOR»
                 «FOR r : reactorIDs»
-                scheduler.«r»_to_S,
+                scheduler.«getVarNamefromID(r)»_to_S,
                 «ENDFOR»
                 «FOR i : 0 ..< reactors.length»
-                «reactorDeclNames.get(i)».__in__,
-                «reactorDeclNames.get(i)».__out__,
+                «getVarNamefromID(reactorIDs.get(i))».__in__,
+                «getVarNamefromID(reactorIDs.get(i))».__out__,
                 «FOR v : reactors.get(i).getStateVars»
-                «reactorDeclNames.get(i)».«v.name»,
+                «getVarNamefromID(reactorIDs.get(i))».«v.name»,
                 «ENDFOR»
                 «ENDFOR»
                 scheduler.finalized
@@ -1548,7 +1627,7 @@ class UclidGenerator extends GeneratorBase {
         writeSourceCodeToFile(getCode().getBytes(), path + File.separator + filename)
     }
     
-    protected def generateDriverInterleaving(String path) {
+    protected def generateDriver(String path) {
         code = new StringBuilder()
         val filename = "run.sh"
         
