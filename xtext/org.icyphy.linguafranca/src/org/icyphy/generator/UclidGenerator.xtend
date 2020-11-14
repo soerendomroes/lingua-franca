@@ -247,38 +247,6 @@ class UclidGenerator extends GeneratorBase {
         return li
     }
     
-    /*
-    protected def ArrayList<String> getStartupTriggerIDs() {
-        var arr = new ArrayList<String>
-        for (t : triggerIDs) {
-            if (t.endsWith('_startup')) {
-                arr.add(t)
-            }
-        }
-        return arr
-    }
-    */
-    
-    
-    // Returns a list of reactors that have startup actions
-    /*
-    protected def ArrayList<String> getstartupReactorIDs() {
-        var reactorIDs = new ArrayList<String>();
-        for (r : reactors) {
-            for (i : this.instantiationGraph.getInstantiations(r)) {
-                for (rxn : r.getReactions()) {
-                    for (t : rxn.getTriggers) {
-                        if (t.isStartup()) {
-                            reactorIDs.add(r.name + '_' + i.name)
-                        }
-                    }
-                }
-            }
-        }
-        return reactorIDs
-    }
-    */
-    
     protected def ArrayList<String> getStartupReactorClasses() {
         var arr = new ArrayList<String>
         for (t : triggerIDs) {
@@ -313,9 +281,7 @@ class UclidGenerator extends GeneratorBase {
         generateScheduler(path)
         generateReactor(path)
         generateMain(path, specs)
-        generateDriver(path)
-        
-        println("Model generation has completed.")
+        generateDriver(path)        
     }
     
     /*
@@ -445,6 +411,9 @@ class UclidGenerator extends GeneratorBase {
         
             define is_present(e : event_t) : boolean
             = (e != { -1, NULL, NULL, NULL_NULL, -1, false });
+            
+            define value(e : event_t) : token_t
+            = e._5;
         }
          
         ''')
@@ -956,15 +925,6 @@ class UclidGenerator extends GeneratorBase {
             var t : instant_t;
         ''')
         
-        // Portmap for determining destination and trigger
-        /*
-        pr('''
-            // Portmaps
-            var port_to_dest : [output_id_t]reactor_id_t;
-            var port_to_trigger : [output_id_t]trigger_id_t;
-        ''')
-        */
-        
         // FIXME: change how reaction is determined. Use an explicit
         // field in the event definition.
         pr('''
@@ -1134,6 +1094,8 @@ class UclidGenerator extends GeneratorBase {
         val filename = "reactor.ucl"
         var String rxn_postfix
         var ArrayList<String> rxn_triggerIDs
+        // The length of the outer list is the length of the reactions.
+        var ArrayList<ArrayList<String>> reactor_triggerIDs
         
         pr('''
         /******************************
@@ -1144,6 +1106,8 @@ class UclidGenerator extends GeneratorBase {
         ''')
         
         for (r : reactors) {
+            reactor_triggerIDs = new ArrayList
+                    
             pr('''
                 module Reactor_«r.name» {
             ''')
@@ -1228,7 +1192,9 @@ class UclidGenerator extends GeneratorBase {
              * Generate reactions 
              */
             // Process reaction body
-            // Each reactor keeps a linkedlist of linkedlist
+            // Each reactor keeps track of a linkedlist of linkedlist
+            // of reactions. The inner linkedlist is used to store chunks
+            // of the reaction code
             var rxnList = new LinkedList
             for (_rxn : r.getReactions) {
                 // Create a new reaction linkedist
@@ -1236,31 +1202,44 @@ class UclidGenerator extends GeneratorBase {
                 // separated by observe decorator.
                 var rxnCode = _rxn.getCode.getBody
                 // println(rxnCode)
-                var li = rxnCode.split("#observe")
+                var li = rxnCode.split("@observe")
                 // println(li.size)
                     
                 // Replace macro
                 for (i : 0 ..< li.size) {
                     var stmts = li.get(i).split(";")
-                        
                     for (j : 0 ..< stmts.size) {
                         // If the string is a macro, perform translation.
                         // Otherwise, return a stripped statement
                         stmts.set(j, replaceMacro(stmts.get(j), 'interleaving'))
                     }
-                    
-                    /*    
-                    for (s : stmts) {
-                        println(s)
-                    }
-                    */
-                        
+                    // After replacing macros, put the chunks together 
                     li.set(i, String.join("\n", stmts))
                 }
-                rxnList.add(String.join("\n", li))
+                // rxnList.add(String.join("\n", li))
+                // Adding a linkedlist to the rxn linkedlist
+                rxnList.add(li)
             }
             
-            for (i : 0 ..< r.getReactions.size) {
+            // Generate program counters
+            pr('''
+                type pc_t = enum {
+                    «FOR i : 0 ..< rxnList.size»
+                        «FOR j : 0 ..< rxnList.get(i).size»
+                            «r.name»_pc_rxn«i»_block«j»,
+                        «ENDFOR»
+                    «ENDFOR»
+                    «r.name»_pc_end
+                };
+            ''')
+            
+            pr('''
+                // Internal variables
+                var pc : pc_t;
+                var delay : integer;
+            ''')
+            
+            for (i : 0 ..< rxnList.size) {
                 // Get reaction triggers
                 rxn_triggerIDs = new ArrayList<String>
                 // FIXME: with rxn.triggers, the IDE does not return error..
@@ -1272,9 +1251,12 @@ class UclidGenerator extends GeneratorBase {
                         rxn_triggerIDs.add(t.variable.name)
                     }
                 }
+                // Add to the bigger list for next() block
+                reactor_triggerIDs.add(rxn_triggerIDs)
                 
-                // Generate reaction postfix by concatenating trigger IDs
                 // FIXME: generate from rxn_triggerIDs
+                /*
+                // Generate reaction postfix by concatenating trigger IDs
                 rxn_postfix = '''
                     «FOR t : r.getReactions.get(i).getTriggers»«IF t.isStartup()»_startup«ELSEIF t instanceof VarRef»_«t.variable.name»«ENDIF»«ENDFOR»
                 '''
@@ -1283,59 +1265,75 @@ class UclidGenerator extends GeneratorBase {
                 pr('''
                     procedure rxn«rxn_postfix»()
                 ''')
+                */
                 
-                // Declare all state variables modifiable
-                // FIXME: check if this has unwanted side effects
-                if (r.getStateVars.length > 0) {
+                // Generate reaction chunk
+                for (j : 0 ..< rxnList.get(i).size) {
+                    // Declare procedure
                     pr('''
-                        modifies «FOR j : 0 ..< r.getStateVars.length»«r.getStateVars.get(j).name»«IF j != r.getStateVars.length - 1»,«ENDIF»«ENDFOR»;
+                        procedure rxn«i»_block«j»()
                     ''')
-                }
-                
-                // Declare input variables to be modifiable
-                for (t : r.getReactions.get(i).getTriggers) {
-                    if (t.isStartup()) pr('modifies startup;')
-                    else if (t instanceof VarRef) pr('modifies ' + t.variable.name + ';')
-                }
-                
-                // Declare internal variables to be modifiable
-                pr('modifies outQ, __out__, __pop__;')
-                
-                // Generate finalized reaction table
-                // FIXME: finalize reactions not triggers.
-                // Currently, a single-trigger-based mechanism is in place.
-                for (t : r.getReactions.get(i).getTriggers) {
-                    pr('''
-                        modifies finalize_«r.name»_«IF t.isStartup()»startup«ELSEIF t instanceof VarRef»«t.variable.name»«ENDIF»;
-                    ''')
-                }
-                
-                
-                pr('''
-                    {
-                        «rxnList.get(i)»
-
-                        // Pop a value from outQ
-                        // Handled in the reaction procedure for now since
-                        // we need a sequential update to outQ.
-                        __pop__ = popQ(outQ);
-                        outQ = __pop__._1;
-                        __out__ = __pop__._2;
-                
-                        // Clear inputs
-                        // startup = NULL_EVENT;
-                        «FOR t : rxn_triggerIDs»
-                            «t» = NULL_EVENT;
-                        «ENDFOR»
-                
-                        // Update finalized table
-                        // finalize_Source_startup = true;
-                        «FOR t : rxn_triggerIDs»
-                            finalize_«r.name»_«t» = true;
-                        «ENDFOR»
+                    
+                    // Declare all state variables modifiable
+                    // FIXME: check if this has unwanted side effects
+                    if (r.getStateVars.length > 0) {
+                        pr('''
+                            modifies «FOR k : 0 ..< r.getStateVars.length»«r.getStateVars.get(k).name»«IF k != r.getStateVars.length - 1»,«ENDIF»«ENDFOR»;
+                        ''')
                     }
-                ''')
-
+                    
+                    // Declare input variables to be modifiable
+                    for (t : r.getReactions.get(i).getTriggers) {
+                        if (t.isStartup()) pr('modifies startup;')
+                        else if (t instanceof VarRef) pr('modifies ' + t.variable.name + ';')
+                    }
+                    
+                    // Declare internal variables to be modifiable
+                    pr('modifies outQ, __out__, __pop__;')
+                    
+                    // Generate finalized reaction table
+                    // FIXME: finalize reactions not triggers.
+                    // Currently, a single-trigger-based mechanism is in place.
+                    for (t : r.getReactions.get(i).getTriggers) {
+                        pr('''
+                            modifies finalize_«r.name»_«IF t.isStartup()»startup«ELSEIF t instanceof VarRef»«t.variable.name»«ENDIF»;
+                        ''')
+                    }
+                    
+                    // Declare program counter to be modifiable
+                    pr('modifies pc;')
+                    
+                    pr('''
+                        {
+                            // Block body
+                            «rxnList.get(i).get(j)»
+                            
+                            // Update pc
+                            pc = «IF j < rxnList.get(i).size - 1»«r.name»_pc_rxn«i»_block«j+1»«ELSE»«r.name»_pc_end«ENDIF»;
+                            
+                            «IF j == rxnList.get(i).size - 1»
+                            // Pop a value from outQ
+                            // Handled in the reaction procedure for now since
+                            // we need a sequential update to outQ.
+                            __pop__ = popQ(outQ);
+                            outQ = __pop__._1;
+                            __out__ = __pop__._2;
+                        
+                            // Clear inputs
+                            // startup = NULL_EVENT;
+                            «FOR t : rxn_triggerIDs»
+                                «t» = NULL_EVENT;
+                            «ENDFOR»
+                        
+                            // Update finalized table
+                            // finalize_Source_startup = true;
+                            «FOR t : rxn_triggerIDs»
+                                finalize_«r.name»_«t» = true;
+                            «ENDFOR»
+                            «ENDIF»
+                        }
+                    ''')
+                }
             }
              
             pr('''
@@ -1400,11 +1398,6 @@ class UclidGenerator extends GeneratorBase {
             
                         // Reset finalize_ outputs at new logical time, which is
                         // denoted by a new finalized table
-                        /*
-                        if (finalized == {false, false, false}) {
-                            finalize_Source_startup' = false;
-                        }
-                        */
                         if (finalized == {
                             «FOR i : 0 ..< triggerIDs.length»
                                 false«IF i != triggerIDs.length - 1»,«ENDIF»
@@ -1417,32 +1410,52 @@ class UclidGenerator extends GeneratorBase {
                     }
                     else {
                         // File specific: trigger reaction
-                        case
-                            «IF startupReactorIDs.contains(r.name)»
-                                (is_present(startup)) : {
-                                    call () = rxn_startup();
+                        if (delay == 0) {
+                            havoc delay;
+                            case
+                                «FOR i : 0 ..< rxnList.size»
+                                    («FOR ti : 0..< reactor_triggerIDs.get(i).size»«IF ti != 0» && «ENDIF»is_present(«reactor_triggerIDs.get(i).get(ti)»)«ENDFOR») : {
+                                    case
+                                        «FOR j : 0 ..< rxnList.get(i).size»
+                                        (pc == «r.name»_pc_rxn«i»_block«j») : {
+                                            call () = rxn«i»_block«j»();
+                                        }
+                                        «ENDFOR»
+                                    esac
+                                    }
+                                «ENDFOR»
+                                
+                                (all_inputs_empty()) : {
+                                    __pop__' = popQ(outQ);
+                                    outQ' = __pop__'._1;
+                                    __out__' = __pop__'._2;
                                 }
-                            «ENDIF»
-                            «FOR v : r.getInputs»
-                                (is_present(«v.name»)) : {
-                                    call () = rxn_«v.name»();    
-                                }
-                            «ENDFOR» 
-                            «FOR v : r.getActions»
-                                (is_present(«v.name»)) : {
-                                    call () = rxn_«v.name»();    
-                                }
-                            «ENDFOR» 
-                            
-                            (all_inputs_empty()) : {
-                                __pop__' = popQ(outQ);
-                                outQ' = __pop__'._1;
-                                __out__' = __pop__'._2;
-                            }
-                        esac
+                            esac
+                        }
+                        else {
+                            delay' = delay - 1;    
+                        }
                     }
                 }
             ''')
+            
+            /*
+                «IF startupReactorIDs.contains(r.name)»
+                (is_present(startup)) : {
+                   call () = rxn_startup();
+                }
+                «ENDIF»
+                «FOR v : r.getInputs»
+                (is_present(«v.name»)) : {
+                    call () = rxn_«v.name»();    
+                }
+                «ENDFOR»    
+                «FOR v : r.getActions»
+                    (is_present(«v.name»)) : {
+                        call () = rxn_«v.name»();    
+                    }
+                «ENDFOR»
+             */
             
             pr('}')
         }
@@ -1512,17 +1525,6 @@ class UclidGenerator extends GeneratorBase {
         );
         ''')
         
-        // Generate reactor instances
-        // FIXME: move decl name collection to top-level doGenerate
-        //        support multiple declarations of the same reactor
-        /*
-        val reactorDeclNames = new ArrayList<String>
-        for (r : reactors) {
-            for (i : this.instantiationGraph.getInstantiations(r)) {
-                reactorDeclNames.add(i.name)
-            }
-        }
-        */
         for (i : 0 ..< reactorIDs.length) {
             var triggers = getReactorTriggerIDs(getReactorFromReactorID(reactorIDs.get(i)))
             pr('''
@@ -1589,7 +1591,6 @@ class UclidGenerator extends GeneratorBase {
             check;
             print_results;
             v.print_cex(
-                scheduler.t,
                 scheduler.event_q.contents, 
                 scheduler.event_q.op,
                 scheduler.event_q.data,
@@ -1604,6 +1605,7 @@ class UclidGenerator extends GeneratorBase {
                 scheduler.rq_op,
                 scheduler.rq_data,
                 scheduler.rq_out,
+                scheduler.finalized,
                 «FOR r : reactorIDs»
                 scheduler.S_to_«getVarNamefromID(r)»,
                 «ENDFOR»
@@ -1616,8 +1618,10 @@ class UclidGenerator extends GeneratorBase {
                 «FOR v : reactors.get(i).getStateVars»
                 «getVarNamefromID(reactorIDs.get(i))».«v.name»,
                 «ENDFOR»
+                «getVarNamefromID(reactorIDs.get(i))».pc,
+                «getVarNamefromID(reactorIDs.get(i))».delay,
                 «ENDFOR»
-                scheduler.finalized
+                scheduler.t
             );
         }
         ''')
