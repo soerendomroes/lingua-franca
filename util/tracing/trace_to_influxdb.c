@@ -105,7 +105,8 @@ size_t read_and_write_trace() {
         // FIXME: What is the difference between a TAG and F_STR (presumably, Field String)?
         // Presumably, the HTTP post is formatted as a "line protocol" command. See:
         // https://docs.influxdata.com/influxdb/v2.0/reference/syntax/line-protocol/
-        int response_code = post_curl(&influx_v2_client,
+        int response_code = post_http(&influx_client,
+        //int response_code = post_curl(&influx_v2_client,
             INFLUX_MEAS(trace_event_names[trace[i].event_type]),
             INFLUX_TAG("Reactor", reactor_name),
             INFLUX_TAG("Reaction", reaction_name),
@@ -117,6 +118,7 @@ size_t read_and_write_trace() {
             INFLUX_TS(trace[i].physical_time),
             INFLUX_END
         );
+
         if (response_code != 0) {
             fprintf(stderr, "****** response code: %d\n", response_code);
             return 0;
@@ -138,9 +140,11 @@ int main(int argc, char* argv[]) {
     influx_v2_client.bucket = "tracing";
     influx_v2_client.token = "ra0gassNhZoC0V1ABxVHT6-34thskx5HFgMEivd2WFfHuNXyspaYj9SB992YFKTCtne0_pb80OSKundUa7KLGQ==";
     
-    //influx_client.db = "test";
-    //influx_client.usr = "eal";
-    //influx_client.pwd = "changeme";
+    influx_client.host = "localhost";
+    influx_client.port = 8086;
+    influx_client.db = "LF_Events";
+    influx_client.usr = "ravi";
+    influx_client.pwd = "denso";
 
     open_files(argv[1], NULL);
 

@@ -1,0 +1,36 @@
+# specify the node base image with your desired version node:<version>
+FROM gcc:latest
+
+ENV destPath=/root/spatRecommender/
+COPY ./src-gen/spatRecommender.c ${destPath}
+#COPY ./src-gen/util.* ${destPath}
+COPY ./src-gen/ctarget.h ${destPath}
+COPY ./src-gen/core ${destPath}/core
+COPY paho.mqtt.c-master.zip /root/
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+	gcc \
+	libc-dev \
+	make \
+	cmake \
+    openssl \
+    libssl-dev \
+	fakeroot \
+	devscripts \
+	dh-make \
+	lsb-release\ 
+   && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /root/
+RUN unzip paho.mqtt.c-master.zip && rm paho.mqtt.c-master.zip
+WORKDIR /root/paho.mqtt.c-master
+RUN make && make install
+
+EXPOSE 1883
+
+WORKDIR ${destPath}
+RUN echo $(ls -1 ${destPath}/core)
+RUN gcc -o spatRecommender -I/usr/local/include -I./core -L/usr/local/lib -g \
+	-lpaho-mqtt3c -lpthread core/net_util.c spatRecommender.c
+CMD ["./spatRecommender"]

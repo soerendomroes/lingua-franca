@@ -1,0 +1,9 @@
+*.lft
+*-lock.json
+telegraf*
+/*/bin/
+/*/src-gen/
+/*/logs/
+/*/node_modules/
+/*/influxWrite/
+
