@@ -27,13 +27,10 @@
 package org.icyphy.validation
 
 import java.util.ArrayList
-import java.util.Arrays
 import java.util.HashSet
 import java.util.LinkedList
 import java.util.List
 import java.util.Set
-import java.util.Map.Entry;
-
 import org.eclipse.core.resources.IMarker
 import org.eclipse.core.resources.IResource
 import org.eclipse.core.resources.ResourcesPlugin
@@ -42,10 +39,7 @@ import org.eclipse.emf.common.util.EList
 import org.eclipse.emf.ecore.EStructuralFeature
 import org.eclipse.xtext.validation.Check
 import org.icyphy.ModelInfo
-import org.icyphy.Targets
-import org.icyphy.Targets.BuildTypes
-import org.icyphy.Targets.LoggingLevels
-import org.icyphy.Targets.TargetProperties
+import org.icyphy.Target
 import org.icyphy.TimeValue
 import org.icyphy.linguaFranca.Action
 import org.icyphy.linguaFranca.ActionOrigin
@@ -60,6 +54,7 @@ import org.icyphy.linguaFranca.ImportedReactor
 import org.icyphy.linguaFranca.Input
 import org.icyphy.linguaFranca.Instantiation
 import org.icyphy.linguaFranca.KeyValuePair
+import org.icyphy.linguaFranca.KeyValuePairs
 import org.icyphy.linguaFranca.LinguaFrancaPackage.Literals
 import org.icyphy.linguaFranca.Model
 import org.icyphy.linguaFranca.NamedHost
@@ -70,7 +65,7 @@ import org.icyphy.linguaFranca.Preamble
 import org.icyphy.linguaFranca.Reaction
 import org.icyphy.linguaFranca.Reactor
 import org.icyphy.linguaFranca.StateVar
-import org.icyphy.linguaFranca.Target
+import org.icyphy.linguaFranca.TargetDecl
 import org.icyphy.linguaFranca.TimeUnit
 import org.icyphy.linguaFranca.Timer
 import org.icyphy.linguaFranca.Type
@@ -82,7 +77,7 @@ import org.icyphy.linguaFranca.Visibility
 import org.icyphy.linguaFranca.WidthSpec
 
 import static extension org.icyphy.ASTUtils.*
-import org.icyphy.linguaFranca.KeyValuePairs
+import org.icyphy.TargetProperty
 
 /**
  * Custom validation checks for Lingua Franca programs.
@@ -97,9 +92,8 @@ import org.icyphy.linguaFranca.KeyValuePairs
  */
 class LinguaFrancaValidator extends AbstractLinguaFrancaValidator {
 
-    var Targets target;
-
-    var info = new ModelInfo()
+    var Target target
+    public var info = new ModelInfo()
 
     /**
      * Regular expression to check the validity of IPV4 addresses (due to David M. Syzdek).
@@ -134,6 +128,10 @@ class LinguaFrancaValidator extends AbstractLinguaFrancaValidator {
     public static val GLOBALLY_DUPLICATE_NAME = 'GLOBALLY_DUPLICATE_NAME'
 
     static val spacingViolationPolicies = #['defer', 'drop', 'replace']
+
+    public val List<String> targetPropertyErrors = newLinkedList
+    
+    public val List<String> targetPropertyWarnings = newLinkedList
 
     @Check
     def checkImportedReactor(ImportedReactor reactor) {
@@ -184,7 +182,7 @@ class LinguaFrancaValidator extends AbstractLinguaFrancaValidator {
             error(RESERVED_MESSAGE + name, feature)
         }
 
-        if (this.target == Targets.TS) {
+        if (this.target == Target.TS) {
             // "actions" is a reserved word within a TS reaction
             if (name.equals("actions")) {
                 error(ACTIONS_MESSAGE + name, feature)
@@ -296,7 +294,7 @@ class LinguaFrancaValidator extends AbstractLinguaFrancaValidator {
             }
             // If this assignment overrides a parameter that is used in a deadline,
             // report possible overflow.
-            if (this.target == Targets.C &&
+            if (this.target == Target.C &&
                 this.info.overflowingAssignments.contains(assignment)) {
                 error(
                     "Time value used to specify a deadline exceeds the maximum of " +
@@ -312,7 +310,7 @@ class LinguaFrancaValidator extends AbstractLinguaFrancaValidator {
     
     @Check(FAST)
     def checkWidthSpec(WidthSpec widthSpec) {
-        if (this.target != Targets.C && this.target != Targets.CPP && this.target != Targets.Python) {
+        if (this.target != Target.C && this.target != Target.CPP && this.target != Target.Python) {
             error("Multiports and banks are currently only supported by the C and Cpp targets.",
                     Literals.WIDTH_SPEC__TERMS)
         } else {
@@ -322,7 +320,7 @@ class LinguaFrancaValidator extends AbstractLinguaFrancaValidator {
                         error("Width must be a positive integer.", Literals.WIDTH_SPEC__TERMS)
                     }
                 } else {
-                    if (this.target != Targets.C && this.target != Targets.Python) {
+                    if (this.target != Target.C && this.target != Target.Python) {
                         error("Parameterized widths are currently only supported by the C target.", 
                                 Literals.WIDTH_SPEC__TERMS)
                     }
@@ -369,7 +367,7 @@ class LinguaFrancaValidator extends AbstractLinguaFrancaValidator {
         // For the C target, since C has such a weak type system, check that
         // the types on both sides of every connection match. For other languages,
         // we leave type compatibility that language's compiler or interpreter.
-        if (this.target == Targets.C) {
+        if (this.target == Target.C) {
             var type = null as Type
             for (port : connection.leftPorts) {
                 if (type === null) {
@@ -506,7 +504,7 @@ class LinguaFrancaValidator extends AbstractLinguaFrancaValidator {
 
     @Check(FAST)
     def checkDeadline(Deadline deadline) {
-        if (this.target == Targets.C &&
+        if (this.target == Target.C &&
             this.info.overflowingDeadlines.contains(deadline)) {
             error(
                 "Deadline exceeds the maximum of " +
@@ -548,7 +546,7 @@ class LinguaFrancaValidator extends AbstractLinguaFrancaValidator {
         }
         
         // mutable has no meaning in C++
-        if (input.mutable && this.target == Targets.CPP) {
+        if (input.mutable && this.target == Target.CPP) {
             warning(
                 "The mutable qualifier has no meaning for the C++ target and should be removed. " +
                 "In C++, any value can be made mutable by calling get_mutable_copy().",
@@ -596,7 +594,7 @@ class LinguaFrancaValidator extends AbstractLinguaFrancaValidator {
         if (instantiation.widthSpec !== null 
                 && instantiation.widthSpec.ofVariableLength
         ) {
-            if (this.target == Targets.C) {
+            if (this.target == Target.C) {
                 warning("Variable-width banks are for internal use only.",
                     Literals.INSTANTIATION__WIDTH_SPEC
                 )
@@ -612,17 +610,20 @@ class LinguaFrancaValidator extends AbstractLinguaFrancaValidator {
     @Check(FAST)
     def checkKeyValuePair(KeyValuePair param) {
         // Check only if the container's container is a Target.
-        if (param.eContainer.eContainer instanceof Target) {
+        if (param.eContainer.eContainer instanceof TargetDecl) {
 
-            if (!TargetProperties.isValidName(param.name)) {
+            val prop = TargetProperty.forName(param.name)
+
+            // Make sure the key is valid.
+            if (prop === null) {
                 warning(
                     "Unrecognized target parameter: " + param.name +
                         ". Recognized parameters are: " +
-                        TargetProperties.values().join(", ") + ".",
+                        TargetProperty.getOptions().join(", ") + ".",
                     Literals.KEY_VALUE_PAIR__NAME)
             }
-            val prop = TargetProperties.get(param.name)
 
+            // Check whether the property is supported by the target.
             if (!prop.supportedBy.contains(this.target)) {
                 warning(
                     "The target parameter: " + param.name +
@@ -631,198 +632,17 @@ class LinguaFrancaValidator extends AbstractLinguaFrancaValidator {
                     Literals.KEY_VALUE_PAIR__NAME)
             }
 
-            switch prop {
-                case BUILD_TYPE:
-                    if (!Arrays.asList(BuildTypes.values()).exists [
-                        it.toString.equals(param.value.id)
-                    ]) {
-                        error(
-                            "Target property build-type is required to be one of " +
-                                BuildTypes.values(),
-                            Literals.KEY_VALUE_PAIR__VALUE)
-                    }
-                case CLOCK_SYNC:
-                    if (!param.value.id.equalsIgnoreCase('off') 
-                            && !param.value.id.equalsIgnoreCase('initial') 
-                            && !param.value.id.equalsIgnoreCase('on')) {
-                        error("Target property clock-sync is required to be off, initial, or on. "
-                                + "Default is initial.",
-                            Literals.KEY_VALUE_PAIR__VALUE)
-                    }
-                case CLOCK_SYNC_OPTIONS: {
-                    if (param.value.keyvalue === null) {
-                        error("Target property clock-sync-options needs to be a list of "
-                               + "key-value pairs like "
-                               + "{local-federates-on: true, test-offset: 200 msec}",
-                               Literals.KEY_VALUE_PAIR__VALUE)
-                    }
-                    for (entry: param.value.keyvalue.pairs) {
-                        if (entry.name.equalsIgnoreCase('local-federates-on')) {
-                            if (entry.value.literal === null
-                                    || (!entry.value.literal.equalsIgnoreCase('true')
-                                    && !entry.value.literal.equalsIgnoreCase('false'))) {
-                                error("Target property clock-sync-options local-federates-on"
-                                        + " entry needs to be true or false.",
-                                        Literals.KEY_VALUE_PAIR__VALUE)
-                            }
-                        } else if (entry.name.equalsIgnoreCase('test-offset')) {
-                            if (entry.value.unit === null) {
-                                error("Target property clock-sync-options test-offset"
-                                        + " entry needs to be a time value (with units).",
-                                        Literals.KEY_VALUE_PAIR__VALUE)
-                            }
-                        } else if (entry.name.equalsIgnoreCase('period')) {
-                            if (entry.value.unit === null) {
-                                error("Target property clock-sync-options period"
-                                        + " entry needs to be a time value (with units).",
-                                        Literals.KEY_VALUE_PAIR__VALUE)
-                            }
-                        } else if (entry.name.equalsIgnoreCase('attenuation')) {
-                            if (entry.value.literal === null) {
-                                error("Target property clock-sync-options attenuation"
-                                        + " entry needs to be a positive integer.",
-                                        Literals.KEY_VALUE_PAIR__VALUE)
-                            } else {
-                                try {
-                                    val value = Integer.decode(entry.value.literal)
-                                    if (value <= 0) {
-                                        error("Target property clock-sync-options attenuation"
-                                                + " entry needs to be a positive integer.",
-                                                Literals.KEY_VALUE_PAIR__VALUE)
-                                    }
-                                } catch (NumberFormatException ex) {
-                                    error("Target property clock-sync-options attenuation"
-                                            + " entry needs to be a positive integer.",
-                                            Literals.KEY_VALUE_PAIR__VALUE)
-                                }
-                            }
-                        } else if (entry.name.equalsIgnoreCase('trials')) {
-                            if (entry.value.literal === null) {
-                                error("Target property clock-sync-options trials"
-                                        + " entry needs to be an integer.",
-                                        Literals.KEY_VALUE_PAIR__VALUE)
-                            } else {
-                                try {
-                                    val value = Integer.decode(entry.value.literal)
-                                    if (value <= 0) {
-                                        error("Target property clock-sync-options trials"
-                                                + " entry needs to be a positive integer.",
-                                                Literals.KEY_VALUE_PAIR__VALUE)
-                                    }
-                                } catch (NumberFormatException ex) {
-                                    error("Target property clock-sync-options trials"
-                                            + " entry needs to be a positive integer.",
-                                            Literals.KEY_VALUE_PAIR__VALUE)
-                                }
-                            }
-                        } else {
-                            error("Unrecognized clock-sync-options entry. Options are: "
-                                    + "local-federates-on, test-offset.",
-                                    Literals.KEY_VALUE_PAIR__VALUE)
-                        }
-                    }
-                }
-                case CMAKE_INCLUDE:
-                    if (param.value.literal === null) {
-                        error(
-                            "Target property cmake-include is required to be a string.",
-                            Literals.KEY_VALUE_PAIR__VALUE)
-                    }
-                case COMPILER:
-                    if (param.value.literal === null) {
-                        error(
-                            "Target property compile is required to be a string.",
-                            Literals.KEY_VALUE_PAIR__VALUE)
-                    }
-                case COORDINATION:
-                    if (param.value.id.isNullOrEmpty || 
-                        !(param.value.id.equals("centralized") || 
-                        param.value.id.equals("decentralized"))) {
-                        error("Target property 'coordination' can either be " +
-                            "'centralized' or 'decentralized'.",
-                            Literals.KEY_VALUE_PAIR__VALUE)
-                    } 
-                case FLAGS:
-                    if (param.value.literal === null) {
-                        error(
-                            "Target property flags is required to be a string.",
-                            Literals.KEY_VALUE_PAIR__VALUE)
-                    }
-                case FAST:
-                    if (!param.value.id.equals('true') &&
-                        !param.value.id.equals('false')) {
-                        error(
-                            "Target property fast is required to be true or false.",
-                            Literals.KEY_VALUE_PAIR__VALUE)
-                    }
-                case KEEPALIVE:
-                    if (!param.value.id.equals('true') &&
-                        !param.value.id.equals('false')) {
-                        error(
-                            "Target property keepalive is required to be true or false.",
-                            Literals.KEY_VALUE_PAIR__VALUE)
-                    }
-                case LOGGING:
-                    if (!Arrays.asList(LoggingLevels.values()).exists [
-                        it.toString.equalsIgnoreCase(param.value.id)
-                    ]) {
-                        error(
-                            "Target property logging is required to be one of " +
-                                LoggingLevels.values().join(', '),
-                            Literals.KEY_VALUE_PAIR__VALUE)
-                    }
-                case NO_COMPILE:
-                    if (!param.value.id.equals('true') &&
-                        !param.value.id.equals('false')) {
-                        error(
-                            "Target property no-compile is required to be true or false.",
-                            Literals.KEY_VALUE_PAIR__VALUE)
-                    }
-                case NO_RUNTIME_VALIDATION:
-                    if (!param.value.id.equals('true') &&
-                        !param.value.id.equals('false')) {
-                        error(
-                            "Target property no-runtime-validation is required to be true or false.",
-                            Literals.KEY_VALUE_PAIR__VALUE)
-                    }
-                case THREADS: {
-                    if (param.value.literal === null) {
-                        error(
-                            "Target property threads is required to be a non-negative integer.",
-                            Literals.KEY_VALUE_PAIR__VALUE)
-                    }
-                    try {
-                        val value = Integer.decode(param.value.literal)
-                        if (value < 0) {
-                            error(
-                                "Target property threads is required to be a non-negative integer.",
-                                Literals.KEY_VALUE_PAIR__VALUE)
-                        }
-                    } catch (NumberFormatException ex) {
-                        error(
-                            "Target property threads is required to be a non-negative integer.",
-                            Literals.KEY_VALUE_PAIR__VALUE)
-                    }
-                }
-                case TIMEOUT:
-                    if (param.value.unit === null) {
-                        error(
-                            "Target property timeout requires a time unit. Should be one of " +
-                                TimeUnit.VALUES.filter[it != TimeUnit.NONE],
-                            Literals.KEY_VALUE_PAIR__VALUE)
-                    } else if (param.value.time < 0) {
-                        error(
-                            "Target property timeout requires a non-negative time value with units.",
-                            Literals.KEY_VALUE_PAIR__VALUE)
-                    }
-               case TRACING:
-                    if (!param.value.id.equals('true') &&
-                        !param.value.id.equals('false')) {
-                        error(
-                            "Target property tracing is required to be true or false.",
-                            Literals.KEY_VALUE_PAIR__VALUE)
-                    }
-            }
+            // Report problem with the assigned value.
+            prop.type.check(param.value, param.name, this)
+            targetPropertyErrors.forEach [
+                error(it, Literals.KEY_VALUE_PAIR__VALUE)
+            ]
+            targetPropertyErrors.clear()
+            targetPropertyWarnings.forEach [
+                warning(it, Literals.KEY_VALUE_PAIR__VALUE)
+            ]
+            targetPropertyWarnings.clear()
+            
         }
     }
 
@@ -892,7 +712,7 @@ class LinguaFrancaValidator extends AbstractLinguaFrancaValidator {
             }
         }
 
-        if (this.target == Targets.C &&
+        if (this.target == Target.C &&
             this.info.overflowingParameters.contains(param)) {
             error(
                 "Time value used to specify a deadline exceeds the maximum of " +
@@ -903,7 +723,7 @@ class LinguaFrancaValidator extends AbstractLinguaFrancaValidator {
 
     @Check(FAST)
     def checkPreamble(Preamble preamble) {
-        if (this.target == Targets.CPP) {
+        if (this.target == Target.CPP) {
             if (preamble.visibility == Visibility.NONE) {
                 error(
                     "Preambles for the C++ target need a visibility qualifier (private or public)!",
@@ -932,66 +752,66 @@ class LinguaFrancaValidator extends AbstractLinguaFrancaValidator {
     }
 
 	@Check(FAST)
-	def checkReaction(Reaction reaction) {
-		
-		if (reaction.triggers === null || reaction.triggers.size == 0) {
-			warning("Reaction has no trigger.", Literals.REACTION__TRIGGERS)
-		}
-		val triggers = new HashSet<Variable>
-	    // Make sure input triggers have no container and output sources do.
+    def checkReaction(Reaction reaction) {
+
+        if (reaction.triggers === null || reaction.triggers.size == 0) {
+            warning("Reaction has no trigger.", Literals.REACTION__TRIGGERS)
+        }
+        val triggers = new HashSet<Variable>
+        // Make sure input triggers have no container and output sources do.
         for (trigger : reaction.triggers) {
             if (trigger instanceof VarRef) {
                 triggers.add(trigger.variable)
                 if (trigger.variable instanceof Input) {
-                    if ((trigger as VarRef).container !== null) {
+                    if (trigger.container !== null) {
                         error('''Cannot have an input of a contained reactor as a trigger: «trigger.container.name».«trigger.variable.name»''',
-                                Literals.REACTION__TRIGGERS)
+                            Literals.REACTION__TRIGGERS)
                     }
                 } else if (trigger.variable instanceof Output) {
-                        if (trigger.container === null) {
-                            error('''Cannot have an output of this reactor as a trigger: «trigger.variable.name»''',
-                                    Literals.REACTION__TRIGGERS)
-                        }
+                    if (trigger.container === null) {
+                        error('''Cannot have an output of this reactor as a trigger: «trigger.variable.name»''',
+                            Literals.REACTION__TRIGGERS)
+                    }
                 }
             }
         }
 
 		// Make sure input sources have no container and output sources do.
         // Also check that a source is not already listed as a trigger.
-		for (source : reaction.sources) {
-		    if (triggers.contains(source.variable)) {
-		        error('''Source is already listed as a trigger: «source.variable.name»''',
-		                Literals.REACTION__SOURCES)
-		    }
-		    if (source.variable instanceof Input) {
-		        if (source.container !== null) {
-		            error('''Cannot have an input of a contained reactor as a source: «source.container.name».«source.variable.name»''',
-		                    Literals.REACTION__SOURCES)
-		        }
-		    } else if (source.variable instanceof Output) {
+        for (source : reaction.sources) {
+            if (triggers.contains(source.variable)) {
+                error('''Source is already listed as a trigger: «source.variable.name»''',
+                    Literals.REACTION__SOURCES)
+            }
+            if (source.variable instanceof Input) {
+                if (source.container !== null) {
+                    error('''Cannot have an input of a contained reactor as a source: «source.container.name».«source.variable.name»''',
+                        Literals.REACTION__SOURCES)
+                }
+            } else if (source.variable instanceof Output) {
                 if (source.container === null) {
                     error('''Cannot have an output of this reactor as a source: «source.variable.name»''',
-                            Literals.REACTION__SOURCES)
-                }
-            }
-		}
-		
-	    // Make sure output effects have no container and input effects do.
-        for (effect : reaction.effects) {
-            if (effect.variable instanceof Input) {
-                if (effect.container === null) {
-                    error('''Cannot have an input of this reactor as an effect: «effect.variable.name»''',
-                            Literals.REACTION__EFFECTS)
-                }
-            } else if (effect.variable instanceof Output) {
-                if (effect.container !== null) {
-                    error('''Cannot have an output of a contained reactor as an effect: «effect.container.name».«effect.variable.name»''',
-                            Literals.REACTION__EFFECTS)
+                        Literals.REACTION__SOURCES)
                 }
             }
         }
 
-		// Report error if this reaction is part of a cycle.
+        // Make sure output effects have no container and input effects do.
+        for (effect : reaction.effects) {
+            if (effect.variable instanceof Input) {
+                if (effect.container === null) {
+                    error('''Cannot have an input of this reactor as an effect: «effect.variable.name»''',
+                        Literals.REACTION__EFFECTS)
+                }
+            } else if (effect.variable instanceof Output) {
+                if (effect.container !== null) {
+                    error('''Cannot have an output of a contained reactor as an effect: «effect.container.name».«effect.variable.name»''',
+                        Literals.REACTION__EFFECTS)
+                }
+            }
+        }
+
+        // Report error if this reaction is part of a cycle.
         for (cycle : this.info.reactionGraph.cycles) {
             val reactor = (reaction.eContainer) as Reactor
             if (cycle.exists[it.node === reaction]) {
@@ -1000,39 +820,44 @@ class LinguaFrancaValidator extends AbstractLinguaFrancaValidator {
                 reaction.triggers.forEach [ t |
                     (t instanceof VarRef && cycle.exists [ c |
                         c.node === (t as VarRef).variable
-                    ]) ? trigs.add((t as VarRef).toText) : {}
+                    ]) ? trigs.add((t as VarRef).toText) : {
+                    }
                 ]
                 if (trigs.size > 0) {
                     error('''Reaction triggers involved in cyclic dependency in reactor «reactor.name»: «trigs.join(', ')».''',
                         Literals.REACTION__TRIGGERS)
                 }
-                
+
                 // Report involved sources.
                 val sources = new LinkedList()
                 reaction.sources.forEach [ t |
-                    (cycle.exists [ c | c.node === t.variable]) ? 
-                        sources.add(t.toText): {}
+                    (cycle.exists[c|c.node === t.variable])
+                        ? sources.add(t.toText)
+                        : {
+                    }
                 ]
                 if (sources.size > 0) {
                     error('''Reaction sources involved in cyclic dependency in reactor «reactor.name»: «sources.join(', ')».''',
                         Literals.REACTION__SOURCES)
                 }
-                
+
                 // Report involved effects.
                 val effects = new LinkedList()
                 reaction.effects.forEach [ t |
-                    (cycle.exists [ c | c.node === t.variable]) ? 
-                        effects.add(t.toText): {}
+                    (cycle.exists[c|c.node === t.variable])
+                        ? effects.add(t.toText)
+                        : {
+                    }
                 ]
                 if (effects.size > 0) {
                     error('''Reaction effects involved in cyclic dependency in reactor «reactor.name»: «effects.join(', ')».''',
                         Literals.REACTION__EFFECTS)
                 }
-                
+
                 if (trigs.size + sources.size == 0) {
                     error(
                     '''Cyclic dependency due to preceding reaction. Consider reordering reactions within reactor «reactor.name» to avoid causality loop.''',
-                    reaction.eContainer,
+                        reaction.eContainer,
                     Literals.REACTOR__REACTIONS,
                     reactor.reactions.indexOf(reaction))    
                 } else if (effects.size == 0) {
@@ -1046,15 +871,15 @@ class LinguaFrancaValidator extends AbstractLinguaFrancaValidator {
                 // Moving them won't help solve the problem.
             }
         }
-        // FIXME: improve error message. 
-	}
+    // FIXME: improve error message. 
+    }
 
     @Check(FAST)
     def checkReactor(Reactor reactor) {
         checkName(reactor.name, Literals.REACTOR_DECL__NAME)
         
         // C++ reactors may not be called 'preamble'
-        if (this.target == Targets.CPP && reactor.name.equalsIgnoreCase("preamble")) {
+        if (this.target == Target.CPP && reactor.name.equalsIgnoreCase("preamble")) {
             error(
                 "Reactor cannot be named '" + reactor.name + "'",
                 Literals.REACTOR_DECL__NAME
@@ -1229,7 +1054,7 @@ class LinguaFrancaValidator extends AbstractLinguaFrancaValidator {
             error("State must have a type.", Literals.STATE_VAR__TYPE)
         }
 
-        if (this.target == Targets.C && stateVar.init.size > 1) {
+        if (this.target == Target.C && stateVar.init.size > 1) {
             // In C, if initialization is done with a list, elements cannot
             // refer to parameters.
             if (stateVar.init.exists[it.parameter !== null]) {
@@ -1241,12 +1066,12 @@ class LinguaFrancaValidator extends AbstractLinguaFrancaValidator {
     }
 
     @Check(FAST)
-    def checkTarget(Target target) {
-        if (!Targets.isValidName(target.name)) {
+    def checkTargetDecl(TargetDecl target) {
+        if (!Target.hasForName(target.name)) {
             warning("Unrecognized target: " + target.name,
-                Literals.TARGET__NAME)
+                Literals.TARGET_DECL__NAME)
         } else {
-            this.target = Targets.get(target.name);
+            this.target = Target.forName(target.name);
         }
     }
 
@@ -1263,7 +1088,7 @@ class LinguaFrancaValidator extends AbstractLinguaFrancaValidator {
         if (targetProperties.pairs.exists(
             pair |
                 // Check to see if fast is defined
-                TargetProperties.get(pair.name) == TargetProperties.FAST
+                TargetProperty.forName(pair.name) == TargetProperty.FAST
         )) {
             if (info.model.reactors.exists(
                 reactor |
@@ -1292,13 +1117,14 @@ class LinguaFrancaValidator extends AbstractLinguaFrancaValidator {
         if (targetProperties.pairs.exists(
             pair |
                 // Check to see if clock-sync is defined
-                TargetProperties.get(pair.name) == TargetProperties.CLOCK_SYNC
+                TargetProperty.forName(pair.name) == TargetProperty.CLOCK_SYNC
         )) {
 
-            if (info.model.reactors.exists( reactor |
-                // Check to see if the program has a federated reactor and if there is a physical connection
-                // defined.
-                reactor.isFederated
+            if (info.model.reactors.exists(
+                reactor |
+                    // Check to see if the program has a federated reactor and if there is a physical connection
+                    // defined.
+                    reactor.isFederated
             ) == false) {
                 warning(
                     "The clock-sync target property is incompatible with non-federated programs.",
@@ -1355,7 +1181,7 @@ class LinguaFrancaValidator extends AbstractLinguaFrancaValidator {
     @Check(FAST)
     def checkType(Type type) {
         // FIXME: disallow the use of generics in C
-        if (this.target == Targets.CPP) {
+        if (this.target == Target.CPP) {
             if (type.stars.size > 0) {
                 warning(
                     "Raw pointers should be avoided in conjunction with LF. Ports " +
@@ -1367,7 +1193,7 @@ class LinguaFrancaValidator extends AbstractLinguaFrancaValidator {
                 )
             }
         }
-        else if (this.target == Targets.Python) {
+        else if (this.target == Target.Python) {
             if (type !== null) {               
                 error(
                     "Types are not allowed in the Python target",

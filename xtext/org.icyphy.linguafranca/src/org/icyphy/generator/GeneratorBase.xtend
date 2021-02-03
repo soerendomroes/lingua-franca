@@ -32,6 +32,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.OutputStream
+import java.net.URI
 import java.nio.file.Files
 import java.nio.file.Paths
 import java.nio.file.StandardCopyOption
@@ -46,7 +47,6 @@ import org.eclipse.core.resources.IMarker
 import org.eclipse.core.resources.IResource
 import org.eclipse.core.resources.ResourcesPlugin
 import org.eclipse.core.runtime.Path
-import org.eclipse.emf.common.util.URI
 import org.eclipse.emf.ecore.EObject
 import org.eclipse.emf.ecore.resource.Resource
 import org.eclipse.xtext.generator.IFileSystemAccess2
@@ -54,9 +54,11 @@ import org.eclipse.xtext.generator.IGeneratorContext
 import org.eclipse.xtext.nodemodel.util.NodeModelUtils
 import org.eclipse.xtext.resource.XtextResource
 import org.eclipse.xtext.validation.CheckMode
+import org.icyphy.Configuration
 import org.icyphy.InferredType
-import org.icyphy.Targets
-import org.icyphy.Targets.TargetProperties
+import org.icyphy.Target
+import org.icyphy.TargetProperty
+import org.icyphy.TargetProperty.CoordinationType
 import org.icyphy.TimeValue
 import org.icyphy.graph.InstantiationGraph
 import org.icyphy.linguaFranca.Action
@@ -64,7 +66,6 @@ import org.icyphy.linguaFranca.ActionOrigin
 import org.icyphy.linguaFranca.Code
 import org.icyphy.linguaFranca.Connection
 import org.icyphy.linguaFranca.Delay
-import org.icyphy.linguaFranca.Element
 import org.icyphy.linguaFranca.Instantiation
 import org.icyphy.linguaFranca.LinguaFrancaFactory
 import org.icyphy.linguaFranca.Model
@@ -73,7 +74,7 @@ import org.icyphy.linguaFranca.Port
 import org.icyphy.linguaFranca.Reaction
 import org.icyphy.linguaFranca.Reactor
 import org.icyphy.linguaFranca.StateVar
-import org.icyphy.linguaFranca.Target
+import org.icyphy.linguaFranca.TargetDecl
 import org.icyphy.linguaFranca.Time
 import org.icyphy.linguaFranca.TimeUnit
 import org.icyphy.linguaFranca.Type
@@ -83,6 +84,7 @@ import org.icyphy.linguaFranca.Variable
 import org.icyphy.validation.AbstractLinguaFrancaValidator
 
 import static extension org.icyphy.ASTUtils.*
+import static extension org.icyphy.Configuration.*
 
 /**
  * Generator base class for shared code between code generators.
@@ -124,12 +126,11 @@ abstract class GeneratorBase extends AbstractLinguaFrancaValidator {
      */
     protected var code = new StringBuilder
     
-    /** Additional sources to add to the compile command if appropriate. */
-    protected var List<String> compileAdditionalSources = newArrayList
+    /**
+     * The current target configuration.
+     */
+    protected var config = new Configuration()
     
-    /** Additional libraries to add to the compile command using the "-l" command-line option. */
-    protected var List<String> compileLibraries = newArrayList
-
     /**
      * Collection of generated delay classes.
      */
@@ -294,141 +295,28 @@ abstract class GeneratorBase extends AbstractLinguaFrancaValidator {
         'port' -> 0 // Indicator to use the default port, typically 15045.
     )
     
-    /**
-     * The build-type target parameter, or null if there is none.
-     */
-    protected String targetBuildType
-
-    /**
-     * The cmake-include target parameter, or null if there is none.
-     */
-    protected String targetCmakeInclude
     
-    /**
-     * The compiler target parameter, or null if there is none.
-     */
-    protected String targetCompiler
-
-    /**
-     * The compiler flags target parameter, or null if there is none.
-     */
-    protected String targetCompilerFlags
-    
-    /**
-     * The linker flags target parameter, or null if there is none.
-     */
-    protected String targetLinkerFlags
-
-    /**
-     * The compiler target no-compile parameter, or false if there is none.
-     */
-    protected boolean targetNoCompile = false
-    
-    /**
-     * The compiler target no-runtime-validation parameter, or false if there is none.
-     */
-    protected boolean targetNoRuntimeValidation = false
-        
-    /**
-     * The fast target parameter, or false if there is none.
-     */
-    protected boolean targetFast = false
-    
-    /**
-     * The coordination target parameter. Default is
-     * centralized.
-     */
-    protected String targetCoordination = "centralized"
-    
-    /**
-     * List of files to be copied to src-gen.
-     */
-    protected List<String> targetFiles = newLinkedList
-    
-    /**
-     * List of file names from the files target property with no path info.
-     * Useful for copying them to remote machines. This is needed because
-     * target files can be resources with resource paths.
-     */
-    protected List<String> targetFilesNamesWithoutPath = newLinkedList
-    
-    /**
-     * List of proto files to be processed by the code generator.
-     */
-    protected List<String> protoFiles = newLinkedList
     
     /**
      * Contents of $LF_CLASSPATH, if it was set.
      */
     protected String classpathLF
     
-    /**
-     * The value of the keepalive target parameter, or false if there is none.
-     */
-    protected boolean targetKeepalive
-    
-    /**
-     * The target name.
-     */
-    protected String targetName
-    
-    /**
-     * The level of logging or null if not given.
-     */
-    protected String targetLoggingLevel
-
-    /**
-     * The threads target parameter, or the default 0 if there is none.
-     */
-    protected int targetThreads = 0
-
-    /**
-     * The timeout parameter, or the default -1 if there is none.
-     */
-    protected int targetTimeout = -1
-
-    /**
-     * The threads timeout unit parameter, or the default null if there is none.
-     */
-    protected TimeUnit targetTimeoutUnit
-    
-    /**
-     * The tracing target parameter, or false if there is none.
-     */
-    protected boolean targetTracing = false
     
     /**
      * The index available to user-generated reaction that delineates the index
      * of the reactor in a bank of reactors. The value must be set to zero
      * in generated code for reactors that are not in a bank
      */
-     protected String targetBankIndex = "bank_index"
+    protected String targetBankIndex = "bank_index"
      
-     /**
-      * The type of the bank index, which must be an integer in the target language
-      */
-     protected String targetBankIndexType = "int"
-     
-     /**
-      * The clock sync target parameter for federated programs.
-      */
-     protected clockSyncMethod targetClockSync = clockSyncMethod.INITIAL
+    /**
+     * The type of the bank index, which must be an integer in the target language
+     */
+    protected String targetBankIndexType = "int"
 
-    /**
-     * Clock sync options.
-     */
-    protected LinkedHashMap<String,Element> targetClockSyncOptions
-    
-    /**
-     * The clock synchronization technique that is used.
-     * OFF: The clock synchronization is universally off.
-     * STARTUP: Clock synchronization occurs at startup only.
-     * ON: Clock synchronization occurs at startup and at runtime.
-     */
-    protected enum clockSyncMethod {
-        OFF, INITIAL, ON;
-    }
-    
+
+        
     ////////////////////////////////////////////
     //// Private fields.
 
@@ -453,10 +341,6 @@ abstract class GeneratorBase extends AbstractLinguaFrancaValidator {
      */
     def getBinGenPath() {
           directory + File.separator + "bin"
-    }
-    
-    def String getTargetCoordination() {
-        return targetCoordination
     }
     
     /**
@@ -506,91 +390,29 @@ abstract class GeneratorBase extends AbstractLinguaFrancaValidator {
         // If there are any physical actions, ensure the threaded engine is used.
         for (action : resource.allContents.toIterable.filter(Action)) {
             if (action.origin == ActionOrigin.PHYSICAL) {
-                targetThreads = 1
+                config.threads = 1
             }
         }
         
         var target = resource.findTarget
-        targetName = target.name
         if (target.config !== null) {
-            for (param: target.config.pairs ?: emptyList) {
-                switch param.name {
-                    case "build-type":
-                        targetBuildType = param.value.id
-                    case "clock-sync": {
-                        if (param.value.id.equalsIgnoreCase('off')) {
-                            targetClockSync = clockSyncMethod.OFF
-                        } else if (param.value.id.equalsIgnoreCase('initial')) {
-                            targetClockSync = clockSyncMethod.INITIAL
-                        } else if (param.value.id.equalsIgnoreCase('on')) {
-                            targetClockSync = clockSyncMethod.ON
-                        }
-                    }
-                    case "clock-sync-options": {
-                        if (targetClockSyncOptions === null) {
-                            targetClockSyncOptions = new LinkedHashMap<String,Element>()
-                        }
-                        for (entry: param.value.keyvalue.pairs) {
-                            targetClockSyncOptions.put(entry.name, entry.value)
-                        }
-                    }
-                    case "cmake-include":
-                        targetCmakeInclude = param.value.literal.withoutQuotes
-                    case "compiler":
-                        targetCompiler = param.value.literal.withoutQuotes
-                    case "fast":
-                        if (param.value.literal == 'true') {
-                            targetFast = true
-                        }
-                    case TargetProperties.COORDINATION.name:
-                        // Set the target coordination if assigned
-                        // by the user. Values can only be
-                        // 'centralized' or 'decentralized'.
-                        this.targetCoordination = param.value.id
-                    case TargetProperties.FILES.name:
-                        this.targetFiles.addAll(this.collectFiles(param.value))
-                    case TargetProperties.PROTOBUFS.name: 
-                        this.protoFiles.addAll(this.collectFiles(param.value))
-                    case "flags":
-                        targetCompilerFlags = param.value.literal.withoutQuotes
-                    case "no-compile":
-                        if (param.value.literal == 'true') {
-                            targetNoCompile = true
-                        }
-                    case "no-runtime-validation":
-                        if (param.value.literal == 'true') {
-                            targetNoRuntimeValidation = true
-                        }
-                    case "keepalive":
-                        if (param.value.literal == 'true') {
-                            targetKeepalive = true
-                        }
-                    case "logging":
-                        targetLoggingLevel = param.value.id.toUpperCase
-                    case "threads":
-                        targetThreads = Integer.decode(param.value.literal)
-                    case "timeout": {
-                        targetTimeout = param.value.time
-                        targetTimeoutUnit = param.value.unit
-                    }
-                    case "tracing":
-                        if (param.value.literal == 'true') {
-                            targetTracing = true
-                        }
-                }
-            }
+            // Update the configuration according to the set target properties.
+            TargetProperty.update(this.config, target.config.pairs ?: emptyList)
         }
         
         // Override target properties if specified as command line arguments.
         if (context instanceof StandaloneContext) {
             if (context.args.containsKey("no-compile")) {
-                targetNoCompile = true
+                config.noCompile = true
             }
             if (context.args.containsKey("target-compiler")) {
-                targetCompiler = context.args.getProperty("target-compiler")
+                config.compiler = context.args.getProperty("target-compiler")
             }
             if (context.args.containsKey("target-flags")) {
-                targetCompilerFlags = context.args.getProperty("target-flags")
+                config.compilerFlags.clear()
+                if (!context.args.getProperty("target-flags").isEmpty) {
+                    config.compilerFlags.addAll(context.args.getProperty("target-flags").split(' '))
+                }
             }
         }
 
@@ -696,15 +518,15 @@ abstract class GeneratorBase extends AbstractLinguaFrancaValidator {
         val srcGenDir = new File(targetDirectory + File.separator)
         srcGenDir.mkdirs
         
-        for (filename : this.targetFiles) {
-            val file = filename.findFile
+        for (filename : config.fileNames) {
+            val file = filename.findFile(this.directory)
             if (file !== null) {
                 val target = new File(targetDirectory + File.separator + file.name)
                 if (target.exists) {
                     target.delete
                 }
                 Files.copy(file.toPath, target.toPath)
-                targetFilesNamesWithoutPath.add(file.name);
+                config.filesNamesWithoutPath.add(file.name);
             } else {
                 // Try to copy the file as a resource.
                 // If this is missing, it should have been previously reported as an error.
@@ -715,7 +537,7 @@ abstract class GeneratorBase extends AbstractLinguaFrancaValidator {
                         filenameWithoutPath = filename.substring(lastSeparator + 1)
                     }
                     copyFileFromClassPath(filename, targetDirectory + File.separator + filenameWithoutPath)
-                    targetFilesNamesWithoutPath.add(filenameWithoutPath);
+                    config.filesNamesWithoutPath.add(filenameWithoutPath);
                 } catch (IOException ex) {
                     // Ignore. Previously reported as a warning.
                     System.err.println('''WARNING: Failed to find file «filename».''')
@@ -870,7 +692,7 @@ abstract class GeneratorBase extends AbstractLinguaFrancaValidator {
         pr(rtiCode, '''
             for (int i = 0; i < NUMBER_OF_FEDERATES; i++) {
                 initialize_federate(i);
-                «IF targetFast»
+                «IF config.fastMode»
                     federates[i].mode = FAST;
                 «ENDIF»
             }
@@ -987,12 +809,48 @@ abstract class GeneratorBase extends AbstractLinguaFrancaValidator {
         val returnCode = compile.executeCommand(stderr)
 
         if (returnCode != 0 && mode !== Mode.INTEGRATED) {
-            reportError('''«targetCompiler»r returns error code «returnCode»''')
+            reportError('''«config.compiler» returns error code «returnCode»''')
         }
         // For warnings (vs. errors), the return code is 0.
         // But we still want to mark the IDE.
         if (stderr.toString.length > 0 && mode === Mode.INTEGRATED) {
             reportCommandErrors(stderr.toString())
+        }
+    }
+    
+    /**
+     * Run the custom build command specified with the "build" parameter.
+     */
+    protected def runBuildCommand() {
+        var commands = newLinkedList
+        for (cmd : config.buildCommands) {
+            val tokens = newArrayList(cmd.split("\\s+"))
+            if (tokens.size > 1) {
+                val buildCommand = createCommand(tokens.head,
+                    tokens.tail.toList)
+                // If the build command could not be found, abort.
+                // An error has already been reported in createCommand.
+                if (buildCommand === null) { 
+                    return
+                }
+                commands.add(buildCommand)
+            }
+        }
+        
+        for (cmd : commands) {
+            val stderr = new ByteArrayOutputStream()
+            val returnCode = cmd.executeCommand(stderr)
+    
+            if (returnCode != 0 && mode !== Mode.INTEGRATED) {
+                reportError('''Build command "«config.buildCommands»" returns error code «returnCode»''')
+                return
+            }
+            // For warnings (vs. errors), the return code is 0.
+            // But we still want to mark the IDE.
+            if (stderr.toString.length > 0 && mode === Mode.INTEGRATED) {
+                reportCommandErrors(stderr.toString())
+                return
+            }   
         }
     }
     
@@ -1014,8 +872,8 @@ abstract class GeneratorBase extends AbstractLinguaFrancaValidator {
 
         var compileArgs = newArrayList
         compileArgs.add(relativeSrcFilename)
-        compileArgs.addAll(compileAdditionalSources)
-        compileArgs.addAll(compileLibraries)
+        compileArgs.addAll(config.compileAdditionalSources)
+        compileArgs.addAll(config.compileLibraries)
         
         // Only set the output file name if it hasn't already been set
         // using a target property or Args line flag.
@@ -1024,13 +882,12 @@ abstract class GeneratorBase extends AbstractLinguaFrancaValidator {
         }
 
         // If threaded computation is requested, add a -pthread option.
-        if (targetThreads !== 0 || targetTracing) {
+        if (config.threads !== 0 || config.tracing) {
             compileArgs.add("-pthread")
         }
         // Finally add the compiler flags in target parameters (if any)
-        if (targetCompilerFlags !== null && !targetCompilerFlags.isEmpty()) {
-            val flags = targetCompilerFlags.split(' ')
-            compileArgs.addAll(flags)
+        if (!config.compilerFlags.isEmpty()) {
+            compileArgs.addAll(config.compilerFlags)
         }
         // If there is no main reactor, then use the -c flag to prevent linking from occurring.
         // FIXME: we could add a `-c` flag to `lfc` to make this explicit in stand-alone mode.
@@ -1042,7 +899,7 @@ abstract class GeneratorBase extends AbstractLinguaFrancaValidator {
                 reportError("ERROR: Did not output executable; no main reactor found.")
             }
         }
-        return createCommand(targetCompiler, compileArgs)
+        return createCommand(config.compiler, compileArgs)
     }
 
     ////////////////////////////////////////////
@@ -1054,15 +911,6 @@ abstract class GeneratorBase extends AbstractLinguaFrancaValidator {
     	return fileName + ".c";
     }
 
-    /**
-     * Return a set of targets that are acceptable to this generator.
-     * Imported files that are Lingua Franca files must specify targets in this
-     * set or an error message will be reported and the import will be ignored.
-     * The returned set is a set of case-insensitive strings specifying target
-     * names. If any target is acceptable, return null.
-     */
-    protected abstract def Set<String> acceptableTargets()
-    
     /**
      * Clear the buffer of generated code.
      */
@@ -1139,7 +987,7 @@ abstract class GeneratorBase extends AbstractLinguaFrancaValidator {
     }
     
     /**
-     * Creates a ProcessBuilder for a given command.
+     * Create a ProcessBuilder for a given command.
      * 
      * This method makes sure that the given command is executable,
      * It first tries to find the command with 'which cmake'. If that
@@ -1232,17 +1080,17 @@ abstract class GeneratorBase extends AbstractLinguaFrancaValidator {
      * Return the target.
      */
     def findTarget(Resource resource) {
-        var target = null as Target
-        for (t : resource.allContents.toIterable.filter(Target)) {
-            if (target !== null) {
-                throw new RuntimeException("There is more than one target!")
+        var TargetDecl targetDecl
+        for (t : resource.allContents.toIterable.filter(TargetDecl)) {
+            if (targetDecl !== null) {
+                throw new RuntimeException("There is more than one target!") // FIXME: check this in validator
             }
-            target = t
+            targetDecl = t
         }
-        if (target === null) {
+        if (targetDecl === null) {
             throw new RuntimeException("No target found!")
         }
-        target
+        targetDecl
     }
 
     /**
@@ -1550,7 +1398,7 @@ abstract class GeneratorBase extends AbstractLinguaFrancaValidator {
                 val workspaceRoot = ResourcesPlugin.getWorkspace().getRoot()
                 // Sadly, Eclipse defines an interface called "URI" that conflicts with the
                 // Java one, so we have to give the full class name here.
-                val uri = new java.net.URI(parsed.filepath)
+                val uri = new URI(parsed.filepath)
                 val files = workspaceRoot.findFilesForLocationURI(uri)
                 // No idea why there might be more than one file matching the URI,
                 // but Eclipse seems to think there might be. We will just use the
@@ -1587,95 +1435,6 @@ abstract class GeneratorBase extends AbstractLinguaFrancaValidator {
                 )
             }
         }
-    }
-
-    /**
-     * Given the right-hand side of a target property, return a list with all
-     * the files that the property lists.
-     * 
-     * Arrays are traversed, so files are collected recursively. If elements
-     * are found that do not denote files, warnings are reported.
-     * @param value The right-hand side of a target property.
-     */
-    def List<String> collectFiles(Element value) {
-        val files = newLinkedList
-        var filename = ""
-        if (value.array !== null) {
-            for (element : value.array.elements) {
-                files.addAll(element.collectFiles)
-            }
-            return files
-        } else if (value.literal !== null) {
-            filename = value.literal.withoutQuotes
-            files.add(filename)
-        } else if (value.id !== "") {
-            filename = value.id
-            files.add(filename)
-        } else {
-            this.
-                reportWarning(
-                    value, '''Expected a string, path, or array but found something else.''')
-        }
-        // Make sure the file exists and issue a warning if not.
-        val file = filename.findFile
-        if (file === null) {
-            // See if it can be found as a resource.
-            val stream = this.class.getResourceAsStream(filename)
-            if (stream === null) {
-                // Warn that file hasn't been found.
-                this.reportWarning(value, 
-                    '''Could not find «filename». Consider setting LF_CLASSPATH environment variable.''')
-            } else {
-                // Sadly, even with this not null, the file may not exist.
-                try {
-                    stream.read()
-                } catch (IOException ex) {
-                    // Warn that file hasn't been found.
-                    this.
-                        reportWarning(
-                            value, '''Could not find «filename». Consider setting LF_CLASSPATH environment variable.''')
-                }
-                stream.close()
-            }
-        }
-        return files
-    }
-
-    /**
-     * Search for a given file name in the current directory.
-     * If not found, search in directories in LF_CLASSPATH.
-     * If not found there, search relative to the CLASSPATH.
-     * The first file found will be returned.
-     * 
-     * @param fileName The file name or relative path + file name
-     * in plain string format
-     * @return A Java file or null if not found
-     */
-     def File findFile(String fileName) {
-
-        var File foundFile;
-
-        // Check in local directory
-        foundFile = new File(this.directory + '/' + fileName);
-        if (foundFile.exists && foundFile.isFile) {
-            return foundFile;
-        }
-
-        // Check in LF_CLASSPATH
-        // Load all the resources in LF_CLASSPATH if it is set.
-        this.classpathLF = System.getenv("LF_CLASSPATH");
-        if (this.classpathLF !== null) {
-            var String[] paths = this.classpathLF.split(
-                System.getProperty("path.separator"));
-            for (String path : paths) {
-                foundFile = new File(path + '/' + fileName);
-                if (foundFile.exists && foundFile.isFile) {
-                    return foundFile;
-                }
-            }
-        }
-        // Not found.
-        return null;
     }
 
     /**
@@ -1804,7 +1563,7 @@ abstract class GeneratorBase extends AbstractLinguaFrancaValidator {
                 // Attempt to identify the IResource from the object.
                 val eResource = object.eResource
                 if (eResource !== null) {
-                    val uri = new java.net.URI("file:/" + eResource.toPath)
+                    val uri = new URI("file:/" + eResource.toPath)
                     val workspaceRoot = ResourcesPlugin.getWorkspace().getRoot()
                     val files = workspaceRoot.findFilesForLocationURI(uri)
                     if (files !== null && files.length > 0 && files.get(0) !== null) {
@@ -2135,7 +1894,7 @@ abstract class GeneratorBase extends AbstractLinguaFrancaValidator {
             federateByID.put(0, federateInstance)
         } else {
             // The Lingua Franca program is federated
-            isFederated = true            
+            isFederated = true
             if (mainDefn.host !== null) {
                 // Get the host information, if specified.
                 // If not specified, this defaults to 'localhost'
@@ -2192,7 +1951,7 @@ abstract class GeneratorBase extends AbstractLinguaFrancaValidator {
             // otherwise a federate could exit simply because it hasn't received
             // any messages.
             if (federates.size > 1) {
-                targetKeepalive = true
+                config.keepalive = true
             }
             
             // Analyze the connection topology of federates.
@@ -2223,7 +1982,10 @@ abstract class GeneratorBase extends AbstractLinguaFrancaValidator {
                     // Connection spans federates.
                     // First, update the dependencies in the FederateInstances.
                     // Exclude physical connections because these do not create real dependencies.
-                    if (leftFederate !== rightFederate && !connection.physical && (!targetCoordination.equals("decentralized"))) {
+                    if (leftFederate !== rightFederate &&
+                        !connection.physical &&
+                        (config.coordination !==
+                            CoordinationType.DECENTRALIZED)) {
                         var dependsOn = rightFederate.dependsOn.get(leftFederate)
                         if (dependsOn === null) {
                             dependsOn = new LinkedHashSet<Delay>()
@@ -2260,7 +2022,7 @@ abstract class GeneratorBase extends AbstractLinguaFrancaValidator {
                     // (which inherits the delay) and two reactions.
                     // The action will be physical if the connection physical and
                     // otherwise will be logical.
-                    connection.makeCommunication(leftFederate, rightFederate, this)
+                    connection.makeCommunication(leftFederate, rightFederate, this, config.coordination)
 
                     // To avoid concurrent modification exception, collect a list
                     // of connections to remove.
@@ -2280,23 +2042,6 @@ abstract class GeneratorBase extends AbstractLinguaFrancaValidator {
      */
     protected def toPath(Resource resource) {
         return resource.getURI.toPath
-    }
-
-    /**
-     * Create a string representing the absolute file path of a URI.
-     */
-    protected def toPath(URI uri) {
-        if (uri.isPlatform) {
-            val file = ResourcesPlugin.workspace.root.getFile(
-                new Path(uri.toPlatformString(true)))
-            return file.rawLocation.toFile.absolutePath
-        } else if (uri.isFile) {
-        	val file = new File(uri.toFileString)
-            return file.absolutePath
-        } else {
-            throw new IOException("Unrecognized file protocol in URI " +
-                uri.toString)
-        }
     }
 
     /**
@@ -2431,7 +2176,7 @@ abstract class GeneratorBase extends AbstractLinguaFrancaValidator {
     /**
      * Return the Targets enum for the current target
      */
-    def Targets getTarget() {}
+    abstract def Target getTarget()
     
     /**
      * Return a string representing the specified type in the target language.

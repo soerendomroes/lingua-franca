@@ -47,6 +47,8 @@ import org.icyphy.linguaFranca.ActionOrigin
 import org.icyphy.linguaFranca.ArraySpec
 import org.icyphy.linguaFranca.Code
 import org.icyphy.linguaFranca.Connection
+import org.icyphy.linguaFranca.Delay
+import org.icyphy.linguaFranca.Element
 import org.icyphy.linguaFranca.ImportedReactor
 import org.icyphy.linguaFranca.Input
 import org.icyphy.linguaFranca.Instantiation
@@ -66,7 +68,7 @@ import org.icyphy.linguaFranca.TypeParm
 import org.icyphy.linguaFranca.Value
 import org.icyphy.linguaFranca.VarRef
 import org.icyphy.linguaFranca.WidthSpec
-import org.icyphy.linguaFranca.Delay
+import org.icyphy.TargetProperty.CoordinationType
 
 /**
  * A helper class for modifying and analyzing the AST.
@@ -375,7 +377,8 @@ class ASTUtils {
         Connection connection, 
         FederateInstance leftFederate,
         FederateInstance rightFederate,
-        GeneratorBase generator
+        GeneratorBase generator,
+        CoordinationType coordination
     ) {
         val factory = LinguaFrancaFactory.eINSTANCE
         // Assume all the types are the same, so just use the first on the right.
@@ -417,7 +420,7 @@ class ASTUtils {
             // If the connection is logical but coordination
             // is decentralized, we would need
             // to make P2P connections
-            if (generator.targetCoordination.equals("decentralized")) {
+            if (coordination === CoordinationType.DECENTRALIZED) {
                 leftFederate.outboundP2PConnections.add(rightFederate)
                 rightFederate.inboundP2PConnections.add(leftFederate)                
             }            
@@ -815,6 +818,54 @@ class ASTUtils {
     }
     
     /**
+     * Return a textual representation of the given element, 
+     * without quotes if there are any. Leading or trailing 
+     * whitespace is removed.
+     * 
+     * @param e The element to be rendered as a string.
+     */
+    def static String toText(Element e) {
+        var str = ""
+        if (e.literal !== null) {
+            str = e.literal.withoutQuotes.trim
+        }
+        if (e.id !== null) {
+            str = e.id
+        }
+        return '''«str»'''
+    }
+    
+    /**
+     * Return an integer representation of the given element.
+     * 
+     * Internally, this method uses Integer.decode, so it will
+     * also understand hexadecimal, binary, etc.
+     * 
+     * @param e The element to be rendered as an integer.
+     */
+    def static toInteger(Element e) {
+        return Integer.decode(e.literal)
+    }
+    
+    /**
+     * Return a time value based on the given element.
+     * 
+     * @param e The element to be rendered as a time value.
+     */
+    def static toTimeValue(Element e) {
+        return new TimeValue(e.time, e.unit)
+    }
+    
+    /**
+     * Return a boolean based on the given element.
+     * 
+     * @param e The element to be rendered as a boolean.
+     */
+    def static toBoolean(Element e) {
+        return e.toText.equalsIgnoreCase('true')
+    }
+    
+    /**
      * Convert a time to its textual representation as it would
      * appear in LF code.
      * 
@@ -895,6 +946,30 @@ class ASTUtils {
     }
     
     /**
+     * Given the right-hand side of a target property, return a list with all
+     * the strings that the property lists.
+     * 
+     * Arrays are traversed, so strings are collected recursively. Empty strings
+     * are ignored; they are not added to the list.
+     * @param value The right-hand side of a target property.
+     */
+    def static List<String> toListOfStrings(Element value) {
+        val elements = newLinkedList
+        if (value.array !== null) {
+            for (element : value.array.elements) {
+                elements.addAll(element.toListOfStrings)
+            }
+            return elements
+        } else {
+            val v = value.toText
+            if (!v.isEmpty) {
+                elements.add(value.toText)
+            }
+        }
+        return elements
+    }
+    
+    /**
      * Translate the given type into its textual representation, but
      * do not append any array specifications.
      * @param type AST node to render as string.
@@ -966,7 +1041,7 @@ class ASTUtils {
      */
     def static boolean isInteger(String literal) {
         try {
-            Integer.parseInt(literal)
+            Integer.decode(literal)
         } catch (NumberFormatException e) {
             return false
         }

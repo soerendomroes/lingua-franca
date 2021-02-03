@@ -1,7 +1,7 @@
 /* Generator for C target. */
 
 /*************
-Copyright (c) 2019, The University of California at Berkeley.
+Copyright (c) 2019-2021, The University of California at Berkeley.
 
 Redistribution and use in source and binary forms, with or without modification,
 are permitted provided that the following conditions are met:
@@ -44,11 +44,14 @@ import org.eclipse.xtext.generator.IGeneratorContext
 import org.eclipse.xtext.nodemodel.util.NodeModelUtils
 import org.icyphy.ASTUtils
 import org.icyphy.InferredType
-import org.icyphy.Targets
+import org.icyphy.Target
+import org.icyphy.TargetProperty.ClockSyncMode
+import org.icyphy.TargetProperty.CoordinationType
 import org.icyphy.TimeValue
 import org.icyphy.linguaFranca.Action
 import org.icyphy.linguaFranca.ActionOrigin
 import org.icyphy.linguaFranca.Code
+import org.icyphy.linguaFranca.Delay
 import org.icyphy.linguaFranca.Input
 import org.icyphy.linguaFranca.Instantiation
 import org.icyphy.linguaFranca.Output
@@ -64,7 +67,6 @@ import org.icyphy.linguaFranca.VarRef
 import org.icyphy.linguaFranca.Variable
 
 import static extension org.icyphy.ASTUtils.*
-import org.icyphy.linguaFranca.Delay
 
 /** 
  * Generator for C target. This class generates C code definining each reactor
@@ -286,10 +288,7 @@ class CGenerator extends GeneratorBase {
     
     ////////////////////////////////////////////
     //// Private variables
-    
-    // Set of acceptable import targets includes only C.
-    val acceptableTargetSet = newLinkedHashSet('C')
-    
+        
     // Place to collect code to initialize the trigger objects for all reactor instances.
     var initializeTriggerObjects = new StringBuilder()
 
@@ -326,8 +325,8 @@ class CGenerator extends GeneratorBase {
     new () {
         super()
         // set defaults
-        this.targetCompiler = "gcc"
-        this.targetCompilerFlags = "-O2"// -Wall -Wconversion"
+        config.compiler = "gcc"
+        config.compilerFlags.add("-O2") // -Wall -Wconversion"
     }
 
     ////////////////////////////////////////////
@@ -369,8 +368,11 @@ class CGenerator extends GeneratorBase {
 
         // Copy the required core library files into the target file system.
         // This will overwrite previous versions.
-        var coreFiles = newArrayList("reactor_common.c", "reactor.h", "pqueue.c", "pqueue.h", "tag.h", "tag.c", "trace.h", "trace.c", "util.h", "util.c")
-        if (targetThreads === 0) {
+        // Note that net_util.h/c are not used by the infrastructure
+        // unless the program is federated, but they are often useful for user code,
+        // so we include them anyway.
+        var coreFiles = newArrayList("net_util.c", "net_util.h", "reactor_common.c", "reactor.h", "pqueue.c", "pqueue.h", "tag.h", "tag.c", "trace.h", "trace.c", "util.h", "util.c")
+        if (config.threads === 0) {
             coreFiles.add("reactor.c")
         } else {
             coreFiles.add("reactor_threaded.c")
@@ -380,7 +382,7 @@ class CGenerator extends GeneratorBase {
         // Also, create two RTI C files, one that launches the federates
         // and one that does not.
         if (federates.length > 1) {
-            coreFiles.addAll("net_util.c", "net_util.h", "rti.c", "rti.h", "federate.c")
+            coreFiles.addAll("rti.c", "rti.h", "federate.c", "clock-sync.h", "clock-sync.c")
             createFederateRTI()
             createLauncher(coreFiles)
         }
@@ -407,45 +409,9 @@ class CGenerator extends GeneratorBase {
                 initializeTriggerObjectsEnd = new StringBuilder()                
                         
                 // Enable clock synchronization if the federate is not local and clock-sync is enabled
-                if (targetClockSync != clockSyncMethod.OFF
-                    && (!federationRTIProperties.get('host').toString.equals(federate.host) 
-                    || targetClockSyncOptions?.get('local-federates-on')?.literal?.equalsIgnoreCase('true'))
-                ) {
-                    // Determine the period with clock clock sync will be done.
-                    var period = 'MSEC(5)'  // The default.
-                    if (targetClockSyncOptions?.get('period') !== null) {
-                        val timeValue = targetClockSyncOptions.get('period')
-                        period = (new TimeValue(timeValue.time, timeValue.unit)).toNanoSeconds.toString;
-                    }
-                    // Determine how many trials there will be each time clock sync is done.
-                    var trials = '10' // The default.
-                    if (targetClockSyncOptions?.get('trials') !== null) {
-                        trials = targetClockSyncOptions.get('trials').literal
-                    }
-                    // Determine the attenuation to apply each time clock sync is done.
-                    var attenuation = '10' // The default.
-                    if (targetClockSyncOptions?.get('attenuation') !== null) {
-                        attenuation = targetClockSyncOptions.get('attenuation').literal
-                    }
-                    // Insert the #defines at the beginning
-                    code.insert(0, '''
-                        #define _LF_CLOCK_SYNC_INITIAL
-                        #define _LF_CLOCK_SYNC_PERIOD_NS «period»
-                        #define _LF_CLOCK_SYNC_EXCHANGES_PER_INTERVAL «trials»
-                        #define _LF_CLOCK_SYNC_ATTENUATION «attenuation»
-                    ''')
-                    System.out.println("Initial clock synchronization is enabled for federate "
-                        + federate.id
-                    );
-                    if (targetClockSync == clockSyncMethod.ON) {
-                        code.insert(0, '''
-                            #define _LF_CLOCK_SYNC_ON
-                        ''')
-                        System.out.println("Runtime clock synchronization is enabled for federate "
-                            + federate.id
-                        );
-                    }
-                }
+                initializeClockSynchronization(federate)
+                
+
                 startTimeStep = new StringBuilder()
                 startTimers = new StringBuilder(commonStartTimers)
                 // This should go first in the start_timers function.
@@ -658,7 +624,7 @@ class CGenerator extends GeneratorBase {
                 // Generate function to schedule timers for all reactors.
                 pr("void __initialize_timers() {")
                 indent()
-                if (targetTracing) {
+                if (config.tracing) {
                     pr('''start_trace("«filename».lft");''') // .lft is for Lingua Franca trace
                 }
                 if (timerCount > 0) {
@@ -674,12 +640,13 @@ class CGenerator extends GeneratorBase {
                 pr("}")
 
                 // Generate a function that will either do nothing
-                // (if there is only one federate) or, if there are
+                // (if there is only one federate or the coordination 
+                // is set to decentralized) or, if there are
                 // downstream federates, will notify the RTI
                 // that the specified logical time is complete.
                 pr('''
                     void logical_tag_complete(instant_t timestep, microstep_t microstep) {
-                        «IF federates.length > 1»
+                        «IF federates.length > 1 && config.coordination == CoordinationType.CENTRALIZED»
                             _lf_logical_tag_complete(timestep, microstep);
                         «ENDIF»
                     }
@@ -725,6 +692,7 @@ class CGenerator extends GeneratorBase {
                             // if the socket ID is not -1, the connection is still open. 
                             // Send an EOF by closing the socket here.
                             for (int i=0; i < NUMBER_OF_FEDERATES; i++) {
+                                // Close outbound connections
                                 if (_lf_federate_sockets_for_outbound_p2p_connections[i] != -1) {
                                     close(_lf_federate_sockets_for_outbound_p2p_connections[i]);
                                     _lf_federate_sockets_for_outbound_p2p_connections[i] = -1;
@@ -732,8 +700,9 @@ class CGenerator extends GeneratorBase {
                             }
                             «IF federate.inboundP2PConnections.length > 0»
                                 «/* FIXME: This pthread_join causes the program to freeze indefinitely on MacOS. */»
-                                // void* thread_return;
-                                // pthread_join(_lf_inbound_p2p_handling_thread_id, &thread_return);
+                                void* thread_return;
+                                info_print("Waiting for incoming connections to close.");
+                                pthread_join(_lf_inbound_p2p_handling_thread_id, &thread_return);
                             «ENDIF»
                             unsigned char message_marker = RESIGN;
                             write_to_socket_errexit(_lf_rti_socket_TCP, 1, &message_marker, 
@@ -749,9 +718,13 @@ class CGenerator extends GeneratorBase {
         }
         // Restore the base filename.
         filename = baseFilename
-                
-        if (!targetNoCompile) {
-            compileCode()
+        
+        if (!config.noCompile) {
+            if (!config.buildCommands.nullOrEmpty) {
+                runBuildCommand()
+            } else {
+                compileCode()
+            }
         } else {
             println("Exiting before invoking target compiler.")
         }
@@ -761,6 +734,52 @@ class CGenerator extends GeneratorBase {
         
         // In case we are in Eclipse, make sure the generated code is visible.
         refreshProject()
+    }
+    
+    /**
+     * Initialize clock synchronization (if enabled) and its related options for a given federate.
+     * 
+     * Clock synchronization can be enabled using the clock-sync target property.
+     * @see https://github.com/icyphy/lingua-franca/wiki/Distributed-Execution#clock-synchronization
+     * 
+     * @param federate The federate to initialize clock synchronizatino for
+     */
+    protected def initializeClockSynchronization(FederateInstance federate) {
+        // Check if clock synchronization should be enabled for this federate in the first place
+        if (config.clockSync != ClockSyncMode.OFF
+            && (!federationRTIProperties.get('host').toString.equals(federate.host) 
+            || config.clockSyncOptions.localFederatesOn)
+        ) {
+            // Insert the #defines at the beginning
+            code.insert(0, '''
+                #define _LF_CLOCK_SYNC_INITIAL
+                #define _LF_CLOCK_SYNC_PERIOD_NS «config.clockSyncOptions.period»
+                #define _LF_CLOCK_SYNC_EXCHANGES_PER_INTERVAL «config.clockSyncOptions.trials»
+                #define _LF_CLOCK_SYNC_ATTENUATION «config.clockSyncOptions.attenuation»
+            ''')
+            System.out.println("Initial clock synchronization is enabled for federate "
+                + federate.id
+            );
+            if (config.clockSync == ClockSyncMode.ON) {
+                var collectStatsEnable = ''
+                if (config.clockSyncOptions.collectStats) {
+                    collectStatsEnable = "#define _LF_CLOCK_SYNC_COLLECT_STATS"
+                    System.out.println("Will collect clock sync statistics for federate " + federate.id)
+                    // Add libm to the compiler flags
+                    // FIXME: This is a linker flag not compile flag but we don't have a way to add linker flags
+                    // FIXME: This is probably going to fail on MacOS (especially using clang)
+                    // because libm functions are builtin
+                    config.compilerFlags.add("-lm")
+                }
+                code.insert(0, '''
+                    #define _LF_CLOCK_SYNC_ON
+                    «collectStatsEnable»
+                ''')
+                System.out.println("Runtime clock synchronization is enabled for federate "
+                    + federate.id
+                );
+            }
+        }
     }
     
     /**
@@ -811,12 +830,9 @@ class CGenerator extends GeneratorBase {
             }
 
             // If a test clock offset has been specified, insert code to set it here.
-            val testOffset = targetClockSyncOptions?.get('test-offset')
-            if (testOffset !== null) {
-                // Validator assures this is a time value.
-                val offset = (new TimeValue(testOffset.time, testOffset.unit)).toNanoSeconds.toString
+            if (config.clockSyncOptions.testOffset !== null) {
                 pr('''
-                    set_physical_clock_offset((1 + «federate.id») * «offset»LL);
+                    set_physical_clock_offset((1 + «federate.id») * «config.clockSyncOptions.testOffset.toNanoSeconds»LL);
                 ''')
             }
             
@@ -827,12 +843,12 @@ class CGenerator extends GeneratorBase {
             
             // Disable clock synchronization for the federate if it resides on the same host as the RTI,
             // unless that is overridden with the clock-sync-options target property.
-            if (targetClockSync != clockSyncMethod.OFF
+            if (config.clockSync !== ClockSyncMode.OFF
                 && (!federationRTIProperties.get('host').toString.equals(federate.host) 
-                    || targetClockSyncOptions?.get('local-federates-on')?.literal?.equalsIgnoreCase('true'))
+                    || config.clockSyncOptions.localFederatesOn)
             ) {
                 pr('''
-                    synchronize_initial_physical_time_with_rti();
+                    synchronize_initial_physical_clock_with_rti(_lf_rti_socket_TCP);
                 ''')
             }
         
@@ -925,37 +941,20 @@ class CGenerator extends GeneratorBase {
         }
         
         val rtiCode = new StringBuilder()
-        if (targetLoggingLevel !== null) {
-            if (targetLoggingLevel.equals("DEBUG")) {
-                pr(rtiCode, '#define LOG_LEVEL 2')
-            } else if (targetLoggingLevel.equals("LOG")) {
-                pr(rtiCode, '#define LOG_LEVEL 1')
-            }
-        }
-        // Determine the period with clock clock sync will be done.
-        var period = 'MSEC(5)'  // The default.
-        if (targetClockSyncOptions?.get('period') !== null) {
-            val timeValue = targetClockSyncOptions.get('period')
-            period = (new TimeValue(timeValue.time, timeValue.unit)).toNanoSeconds.toString;
-        }
-        // Determine how many trials there will be each time clock sync is done.
-        var trials = '10' // The default.
-        if (targetClockSyncOptions?.get('trials') !== null) {
-            trials = targetClockSyncOptions.get('trials').literal
-        }
+        pr(rtiCode, this.defineLogLevel)
         
-        if (targetClockSync == clockSyncMethod.INITIAL) {
+        if (config.clockSync == ClockSyncMode.INITIAL) {
             pr(rtiCode, '''
                 #define _LF_CLOCK_SYNC_INITIAL
-                #define _LF_CLOCK_SYNC_PERIOD_NS «period»
-                #define _LF_CLOCK_SYNC_EXCHANGES_PER_INTERVAL «trials»
+                #define _LF_CLOCK_SYNC_PERIOD_NS «config.clockSyncOptions.period.toNanoSeconds»
+                #define _LF_CLOCK_SYNC_EXCHANGES_PER_INTERVAL «config.clockSyncOptions.trials»
             ''')
-        } else if (targetClockSync == clockSyncMethod.ON) {
+        } else if (config.clockSync == ClockSyncMode.ON) {
             pr(rtiCode, '''
                 #define _LF_CLOCK_SYNC_INITIAL
                 #define _LF_CLOCK_SYNC_ON
-                #define _LF_CLOCK_SYNC_PERIOD_NS «period»
-                #define _LF_CLOCK_SYNC_EXCHANGES_PER_INTERVAL «trials»
+                #define _LF_CLOCK_SYNC_PERIOD_NS «config.clockSyncOptions.period.toNanoSeconds»
+                #define _LF_CLOCK_SYNC_EXCHANGES_PER_INTERVAL «config.clockSyncOptions.trials»
             ''')
         }
         pr(rtiCode, '''
@@ -976,7 +975,7 @@ class CGenerator extends GeneratorBase {
             printf("Starting RTI for %d federates in federation ID %s\n", NUMBER_OF_FEDERATES, federation_id);
             for (int i = 0; i < NUMBER_OF_FEDERATES; i++) {
                 initialize_federate(i);
-                «IF targetFast»
+                «IF config.fastMode»
                     federates[i].mode = FAST;
                 «ENDIF»
             }
@@ -1189,7 +1188,7 @@ class CGenerator extends GeneratorBase {
             if (distCode.length === 0) pr(distCode, distHeader)
             
             val logFileName = '''log/«filename»_RTI.log'''
-            val compileCommand = '''«this.targetCompiler» «this.targetCompilerFlags» src-gen/«filename»_RTI.c -o bin/«filename»_RTI -pthread'''
+            val compileCommand = '''«this.config.compiler» «config.compilerFlags.join(" ")» src-gen/«filename»_RTI.c -o bin/«filename»_RTI -pthread'''
             
             // The mkdir -p flag below creates intermediate directories if needed.
             pr(distCode, '''
@@ -1208,7 +1207,7 @@ class CGenerator extends GeneratorBase {
                 echo "Copying source files for RTI to host «target»"
                 scp «filename»_RTI.c ctarget.h «target»:«path»/src-gen
                 popd > /dev/null
-                echo "Compiling on host «target» using: «this.targetCompiler» «this.targetCompilerFlags» «path»/src-gen/«filename»_RTI.c -o «path»/bin/«filename»_RTI -pthread"
+                echo "Compiling on host «target» using: «config.compiler» «config.compilerFlags.join(" ")» «path»/src-gen/«filename»_RTI.c -o «path»/bin/«filename»_RTI -pthread"
                 ssh «target» ' \
                     cd «path»; \
                     echo "In «path» compiling RTI with: «compileCommand»" >> «logFileName» 2>&1; \
@@ -1256,7 +1255,7 @@ class CGenerator extends GeneratorBase {
             if (federate.host !== null && federate.host != 'localhost' && federate.host != '0.0.0.0') {
                 if(distCode.length === 0) pr(distCode, distHeader)
                 val logFileName = '''log/«filename»_«federate.name».log'''
-                val compileCommand = '''«this.targetCompiler» src-gen/«filename»_«federate.name».c -o bin/«filename»_«federate.name» -pthread «this.targetCompilerFlags»'''
+                val compileCommand = '''«config.compiler» src-gen/«filename»_«federate.name».c -o bin/«filename»_«federate.name» -pthread «config.compilerFlags.join(" ")»'''
                 // FIXME: Should $FEDERATION_ID be used to ensure unique directories, executables, on the remote host?
                 pr(distCode, '''
                     echo "Making directory «path» and subdirectories src-gen, src-gen/core, and log on host «federate.host»"
@@ -1272,7 +1271,7 @@ class CGenerator extends GeneratorBase {
                     popd > /dev/null
                     pushd src-gen > /dev/null
                     echo "Copying source files to host «federate.host»"
-                    scp «filename»_«federate.name».c «FOR file:targetFilesNamesWithoutPath SEPARATOR " "»«file»«ENDFOR» ctarget.h «federate.host»:«path»/src-gen
+                    scp «filename»_«federate.name».c «FOR file:config.filesNamesWithoutPath SEPARATOR " "»«file»«ENDFOR» ctarget.h «federate.host»:«path»/src-gen
                     popd > /dev/null
                     echo "Compiling on host «federate.host» using: «compileCommand»"
                     ssh «federate.host» '\
@@ -2265,7 +2264,8 @@ class CGenerator extends GeneratorBase {
         // Construct the intended_tag inheritance code to go into
         // the body of the function.
         var StringBuilder intendedTagInheritenceCode = new StringBuilder()
-        if (isFederatedAndDecentralized) {
+        // Check if the coordination mode is decentralized and if the reaction has any effects to inherit the tardiness
+        if (isFederatedAndDecentralized && !reaction.effects.nullOrEmpty) {
             pr(intendedTagInheritenceCode, '''
                 if (self->___reaction_«reactionIndex».is_tardy == true) {
             ''')
@@ -2845,7 +2845,7 @@ class CGenerator extends GeneratorBase {
                     «IF minSpacing !== null»
                     «triggerStructName».period = «timeInTargetLanguage(minSpacing)»;
                     «ELSE»
-                    «triggerStructName».period = «org.icyphy.generator.CGenerator.UNDEFINED_MIN_SPACING»;
+                    «triggerStructName».period = «CGenerator.UNDEFINED_MIN_SPACING»;
                     «ENDIF»
                 ''')               
             } else if (triggerInstance instanceof PortInstance) {
@@ -2875,13 +2875,38 @@ class CGenerator extends GeneratorBase {
         val returnCode = protoc.executeCommand()
         if (returnCode == 0) {
             val nameSansProto = filename.substring(0, filename.length - 6)
-            compileAdditionalSources.add("src-gen" + File.separator + nameSansProto +
+            config.compileAdditionalSources.add("src-gen" + File.separator + nameSansProto +
                 ".pb-c.c")
 
-            compileLibraries.add('-l')
-            compileLibraries.add('protobuf-c')    
+            config.compileLibraries.add('-l')
+            config.compileLibraries.add('protobuf-c')    
         } else {
             reportError("protoc-c returns error code " + returnCode)
+        }
+    }
+    
+    /**
+     * Return a string that defines the log level.
+     */
+    static def String defineLogLevel(GeneratorBase generator) {
+        // FIXME: if we align the levels with the ordinals of the
+        // enum (see CppGenerator), then we don't need this function.
+        switch(generator.config.logLevel) {
+            case ERROR: '''
+                #define LOG_LEVEL 0
+            '''
+            case WARN: '''
+                #define LOG_LEVEL 1
+            '''
+            case INFO: '''
+                #define LOG_LEVEL 2
+            ''' 
+            case LOG: '''
+                #define LOG_LEVEL 3
+            '''
+            case DEBUG: '''
+                #define LOG_LEVEL 4
+            '''
         }
     }
     
@@ -3121,7 +3146,7 @@ class CGenerator extends GeneratorBase {
         // If tracing is turned on, record the address of this reaction
         // in the _lf_trace_object_descriptions table that is used to generate
         // the header information in the trace file.
-        if (targetTracing) {
+        if (config.tracing) {
             var description = getShortenedName(instance)
             var nameOfSelfStruct = selfStructName(instance)
             pr(builder, '''
@@ -3294,7 +3319,7 @@ class CGenerator extends GeneratorBase {
                         pr(initializeTriggerObjects, '''
                             __shutdown_reactions[«shutdownReactionCount++»] = &«nameOfSelfStruct»->___reaction_«reactionCount»;
                         ''')
-                        if (targetTracing) {
+                        if (config.tracing) {
                             val description = getShortenedName(instance)
                             pr(initializeTriggerObjects, '''
                                 _lf_register_trace_event(«nameOfSelfStruct», &(«nameOfSelfStruct»->___shutdown),
@@ -3828,15 +3853,6 @@ class CGenerator extends GeneratorBase {
     // //////////////////////////////////////////
     // // Protected methods.
 
-    /** Return a set of targets that are acceptable to this generator.
-     *  Imported files that are Lingua Franca files must specify targets
-     *  in this set or an error message will be reported and the import
-     *  will be ignored. The returned set contains only "C".
-     */
-    override acceptableTargets() {
-        acceptableTargetSet
-    }
-
     /**
      * Generate code for the body of a reaction that takes an input and
      * schedules an action with the value of that input.
@@ -4007,14 +4023,16 @@ class CGenerator extends GeneratorBase {
         // in the C target. Therefore, the nuances regarding
         // the microstep delay are currently not implemented.
         var String additionalDelayString = '-1';
+        // Name of the next immediate destination of this message
+        var String next_destination_name = '''"federate «receivingFed.id»"'''
         if (delay !== null) {
             additionalDelayString = (new TimeValue(delay.interval, delay.unit)).toNanoSeconds.toString;
             // FIXME: handle the case where the delay is a parameter.
         }
         if (isPhysical) {
             socket = '''_lf_federate_sockets_for_outbound_p2p_connections[«receivingFed.id»]'''
-            messageType = "P2P_MESSAGE"            
-        }else if (targetCoordination.equals("decentralized")) {
+            messageType = "P2P_MESSAGE"
+        } else if (config.coordination === CoordinationType.DECENTRALIZED) {
             socket = '''_lf_federate_sockets_for_outbound_p2p_connections[«receivingFed.id»]'''
             messageType = "P2P_TIMED_MESSAGE"
         } else {
@@ -4022,16 +4040,24 @@ class CGenerator extends GeneratorBase {
             // Send the message via rti
             socket = '''_lf_rti_socket_TCP'''
             messageType = "TIMED_MESSAGE"
+            next_destination_name = '''"the RTI"'''
         }
         
         
         var String sendingFunction = '''send_timed_message'''
-        var String commonArgs = '''«additionalDelayString», «socket», «messageType», «receivingPortID», «receivingFed.id», message_length'''
+        var String commonArgs = '''«additionalDelayString», 
+                   «socket»,
+                   «messageType»,
+                   «receivingPortID»,
+                   «receivingFed.id»,
+                   «next_destination_name»,
+                   message_length'''
         if (isPhysical) {
             // Messages going on a physical connection do not
             // carry a timestamp or require the delay;
             sendingFunction = '''send_message'''            
-            commonArgs = '''«socket», «messageType», «receivingPortID», «receivingFed.id», message_length'''
+            commonArgs = '''«socket», «messageType», «receivingPortID», «receivingFed.id»,
+                   «next_destination_name», message_length'''
         }
         
         if (isTokenType(type)) {
@@ -4071,16 +4097,7 @@ class CGenerator extends GeneratorBase {
      *  private variables if such commands are specified in the target directive.
      */
     override generatePreamble() {
-        
-        if (targetLoggingLevel?.equals("DEBUG")) {
-            pr('''
-                #define LOG_LEVEL 2
-            ''')
-        } else if (targetLoggingLevel?.equals("LOG")) {
-            pr('''
-                #define LOG_LEVEL 1
-            ''')
-        }
+        pr(this.defineLogLevel)
         
         if (isFederated) {
             // FIXME: Instead of checking
@@ -4090,12 +4107,12 @@ class CGenerator extends GeneratorBase {
             pr('''
                 #define _LF_IS_FEDERATED
             ''')
-            if (targetCoordination.equals("centralized")) {
+            if (config.coordination === CoordinationType.CENTRALIZED) {
                 // The coordination is centralized.
                 pr('''
                     #define _LF_COORD_CENTRALIZED
                 ''')                
-            } else if (targetCoordination.equals("decentralized")) {                        
+            } else if (config.coordination === CoordinationType.DECENTRALIZED) {
                 // The coordination is decentralized
                 pr('''
                     #define _LF_COORD_DECENTRALIZED
@@ -4109,8 +4126,8 @@ class CGenerator extends GeneratorBase {
                         
         // Handle target parameters.
         // First, if there are federates, then ensure that threading is enabled.
-        if (targetThreads === 0 && federates.length > 1) {
-            targetThreads = 1
+        if (config.threads === 0 && federates.length > 1) {
+            config.threads = 1
         }
 
         includeTargetLanguageSourceFiles()
@@ -4126,7 +4143,7 @@ class CGenerator extends GeneratorBase {
         srcGenDir.mkdirs
         
         // Handle .proto files.
-        for (file : this.protoFiles) {
+        for (file : config.protoFiles) {
             this.processProtoFile(file)
             val dotIndex = file.lastIndexOf('.')
             var rootFilename = file
@@ -4142,30 +4159,30 @@ class CGenerator extends GeneratorBase {
      * accordingly.
      */
     def parseTargetParameters() {
-        if (targetFast) {
+        if (config.fastMode) {
             // The runCommand has a first entry that is ignored but needed.
             if (runCommand.length === 0) {
-                runCommand.add("X")
+                runCommand.add(filename)
             }
             runCommand.add("-f")
             runCommand.add("true")
         }
-        if (targetKeepalive) {
+        if (config.keepalive) {
             // The runCommand has a first entry that is ignored but needed.
             if (runCommand.length === 0) {
-                runCommand.add("X")
+                runCommand.add(filename)
             }
             runCommand.add("-k")
             runCommand.add("true")
         }
-        if (targetTimeout >= 0) {
+        if (config.timeout !== null) {
             // The runCommand has a first entry that is ignored but needed.
             if (runCommand.length === 0) {
-                runCommand.add("X")
+                runCommand.add(filename)
             }
             runCommand.add("-o")
-            runCommand.add(Integer.toString(targetTimeout))
-            runCommand.add(targetTimeoutUnit.toString)
+            runCommand.add(config.timeout.time.toString)
+            runCommand.add(config.timeout.unit.toString)
         }
         
     }
@@ -4175,23 +4192,23 @@ class CGenerator extends GeneratorBase {
      *  uniformly across all target languages.
      */
     protected def includeTargetLanguageHeaders() {
-        if (targetTracing) {
+        if (config.tracing) {
             pr('#define LINGUA_FRANCA_TRACE')
         }
         pr('#include "ctarget.h"')
-        if (targetTracing) {
+        if (config.tracing) {
             pr('#include "core/trace.c"')            
         }
     }
     
     /** Add necessary source files specific to the target language.  */
     protected def includeTargetLanguageSourceFiles() {
-        if (targetThreads > 0) {
+        if (config.threads > 0) {
             // Set this as the default in the generated code,
             // but only if it has not been overridden on the command line.
             pr(startTimers, '''
                 if (_lf_number_of_threads == 0) {
-                   _lf_number_of_threads = «targetThreads»;
+                   _lf_number_of_threads = «config.threads»;
                 }
             ''')
             pr("#include \"core/reactor_threaded.c\"")
@@ -4965,7 +4982,8 @@ class CGenerator extends GeneratorBase {
     public static var UNDEFINED_MIN_SPACING = -1
     
     protected def isFederatedAndDecentralized() {
-        if (isFederated && targetCoordination.equals("decentralized")) {
+        if (isFederated &&
+            config.coordination === CoordinationType.DECENTRALIZED) {
             return true
         }
         return false
@@ -4973,9 +4991,8 @@ class CGenerator extends GeneratorBase {
     
        
     /** Returns the Target enum for this generator */
-    override getTarget()
-    {
-        return Targets.get("C")
+    override getTarget() {
+        return Target.C
     }
         
     override getTargetTimeType() '''interval_t'''

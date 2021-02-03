@@ -1,34 +1,29 @@
 /* Static information about targets. */
-
-/*************
-Copyright (c) 2019, The University of California at Berkeley.
-
-Redistribution and use in source and binary forms, with or without modification,
-are permitted provided that the following conditions are met:
-
-1. Redistributions of source code must retain the above copyright notice,
-   this list of conditions and the following disclaimer.
-
-2. Redistributions in binary form must reproduce the above copyright notice,
-   this list of conditions and the following disclaimer in the documentation
-   and/or other materials provided with the distribution.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY
-EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
-MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL
-THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
-STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
-THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-***************/
+/** 
+ * Copyright (c) 2019, The University of California at Berkeley.
+ * Redistribution and use in source and binary forms, with or without modification,
+ * are permitted provided that the following conditions are met:
+ * 1. Redistributions of source code must retain the above copyright notice,
+ * this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ * this list of conditions and the following disclaimer in the documentation
+ * and/or other materials provided with the distribution.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY
+ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL
+ * THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+ * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
+ * THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
 package org.icyphy;
 
 import java.util.Arrays;
 import java.util.List;
 
-/**
+/** 
  * Enumeration of targets and their associated properties. These classes are
  * written in Java, not Xtend, because the enum implementation in Xtend more
  * primitive. It is safer to use enums rather than string values since it allows
@@ -38,7 +33,7 @@ import java.util.List;
  * 
  * @author{Marten Lohstroh <marten@berkeley.edu>}
  */
-public enum Targets {
+public enum Target {
     C("C", true, Arrays.asList(
                 // List via: https://en.cppreference.com/w/c/keyword
                 "auto",
@@ -87,54 +82,7 @@ public enum Targets {
                 "_Thread_local" // (since C11)
                 )
     ), 
-    CCpp("CCpp", true, Arrays.asList(
-            // List via: https://en.cppreference.com/w/c/keyword
-            "auto",
-            "break",
-            "case",
-            "char",
-            "const",
-            "continue",
-            "default",
-            "do",
-            "double",
-            "else",
-            "enum",
-            "extern",
-            "float",
-            "for",
-            "goto",
-            "if",
-            "inline", // (since C99)
-            "int",
-            "long",
-            "register",
-            "restrict", // (since C99)
-            "return",
-            "short",
-            "signed",
-            "sizeof",
-            "static",
-            "struct",
-            "switch",
-            "typedef",
-            "union",
-            "unsigned",
-            "void",
-            "volatile",
-            "while",
-            "_Alignas", // (since C11)
-            "_Alignof", // (since C11)
-            "_Atomic", // (since C11)
-            "_Bool", // (since C99)
-            "_Complex", // (since C99)
-            "_Generic", // (since C11)
-            "_Imaginary", // (since C99)
-            "_Noreturn", // (since C11)
-            "_Static_assert", // (since C11)
-            "_Thread_local" // (since C11)
-            )
-    ), 
+    CCPP("CCpp", true, Target.C.keywords), 
     CPP("Cpp", true, Arrays.asList(
                 // List via: https://en.cppreference.com/w/cpp/keyword
                 "alignas", // (since C++11)
@@ -384,7 +332,7 @@ public enum Targets {
     /**
      * String representation of this target.
      */
-    public final String name;
+    private final String description;
         
     /**
      * Whether or not this target requires types.
@@ -399,217 +347,61 @@ public enum Targets {
     /**
      * Return an array of all known targets.
      */
-    public final static Targets[] ALL = Targets.values();
+    public final static Target[] ALL = Target.values();
     
-    /**
-     * All target properties along with a list of targets that supports them.
-     * @author{Marten Lohstroh <marten@berkeley.edu>}
-     */
-    public enum TargetProperties {
-        
-        /**
-         * Directive to specify the target build type such as 'Release' or 'Debug'.
-         */
-        BUILD_TYPE("build-type", Arrays.asList(Targets.CPP)),
-        
-        /**
-         * Directive to let the federate execution handle clock synchronization in software.
-         */
-        CLOCK_SYNC("clock-sync", Arrays.asList(Targets.C)),
-
-        /**
-         * Key-value pairs giving options for clock synchronization.
-         */
-        CLOCK_SYNC_OPTIONS("clock-sync-options", Arrays.asList(Targets.C)),
-
-        /**
-         * Directive to specify a cmake to be included by the generated build systems.
-         *
-         * This gives full control over the C++ build as any cmake parameters can be adjusted in the included file.
-         */
-        CMAKE_INCLUDE("cmake-include", Arrays.asList(Targets.CPP)),
-        
-        /**
-         * Directive to specify the target compiler.
-         */
-        COMPILER("compiler", Arrays.asList(Targets.ALL)),
-        
-        /**
-         * Directive to let the execution engine allow logical time to elapse
-         * faster than physical time.
-         */
-        FAST("fast", Arrays.asList(Targets.ALL)),
-        
-        /**
-         * Directive to stage particular files on the class path to be
-         * processed by the code generator.
-         */
-        FILES("files", Arrays.asList(Targets.ALL)),
-        
-        /**
-         * Flags to be passed on to the target compiler.
-         */
-        FLAGS("flags", Arrays.asList(Targets.C, Targets.CCpp)),
-        
-        /**
-         * Directive to specify the coordination mode
-         */
-        COORDINATION("coordination", Arrays.asList(Targets.C, Targets.CCpp, Targets.Python)),
-        
-        /**
-         * Directive to let the execution engine remain active also if there
-         * are no more events in the event queue.
-         */
-        KEEPALIVE("keepalive", Arrays.asList(Targets.ALL)),
-        
-        /**
-         * Directive to specify the grain at which to report log messages during execution.
-         */
-        LOGGING("logging", Arrays.asList(Targets.TS, Targets.CPP, Targets.C, Targets.Python)),
-        
-        /**
-         * Directive to not invoke the target compiler.
-         */
-        NO_COMPILE("no-compile", Arrays.asList(Targets.C, Targets.CPP, Targets.CCpp)),
-        
-        /**
-         * Directive to disable validation of reactor rules at runtime.
-         */
-        NO_RUNTIME_VALIDATION("no-runtime-validation", Arrays.asList(Targets.CPP)),
-        /**
-         * Directive for specifying .proto files that need to be compiled and their
-         * code included in the sources.
-         */
-        PROTOBUFS("protobufs", Arrays.asList(Targets.C, Targets.TS, Targets.Python)),
-        /**
-         * Directive to specify the number of threads.
-         */
-        THREADS("threads", Arrays.asList(Targets.C, Targets.CPP, Targets.CCpp)),
-        
-        /**
-         * Directive to specify the execution timeout.
-         */
-        TIMEOUT("timeout", Arrays.asList(Targets.ALL)),
-
-        /**
-         * Directive to let the runtime produce execution traces.
-         */
-        TRACING("tracing", Arrays.asList(Targets.C, Targets.CPP));
-        
-        /**
-         * List of targets that support this property. If a property is used for
-         * a target that does not support it, a warning reported during
-         * validation.
-         */
-        public final List<Targets> supportedBy;
-        
-        /**
-         * String representation of this target property.
-         */
-        public final String name;
-        
-        /**
-         * Private constructor for target properties.
-         * @param name String representation of this property.
-         * @param supportedBy List of targets that support this property.
-         */
-        private TargetProperties(String name, List<Targets> supportedBy) {
-            this.name = name;
-            this.supportedBy = supportedBy;
-        }
-
-        /**
-         * Check whether a given string corresponds with the name of a valid target property.
-         * @param name The name to find a matching target property for.
-         * @return true if a matching property was found, false otherwise.
-         */
-        public final static boolean isValidName(String name) {
-            if (TargetProperties.get(name) != null) {
-                return true;
-            }
-            return false;
-        }
-        
-        /**
-         * Return the target property that corresponds with the given string.
-         * @param name The name to find a matching target property for.
-         * @return a matching target property, null otherwise.
-         */
-        public final static TargetProperties get(String name) {
-            for (TargetProperties p : TargetProperties.values()) {
-                if (p.toString().equalsIgnoreCase(name))
-                    return p;
-            }
-            return null;
-        }
-
-        /**
-         * Print the name of this target property.
-         */
-        @Override
-        public String toString() {
-            return this.name;
-        }
-    }
-    
-    /**
-     * Build types
-     */
-    public enum BuildTypes {
-        Release, Debug, RelWithDebInfo, MinSizeRel;
-    }
-    
-    /**
-     * Log levels in descending order of severity.
-     * @author{Marten Lohstroh <marten@berkeley.edu>}
-     */
-    public enum LoggingLevels {
-        ERROR, WARN, INFO, LOG, DEBUG;
-    }
-
     /**
      * Private constructor for targets.
+     * 
      * @param name String representation of this target.
      * @param requires Types Whether this target requires type annotations or not.
      * @param keywords List of reserved strings in the target language.
      */
-    private Targets(String name, boolean requiresTypes, List<String> keywords) {
-        this.name = name;
+    private Target(String description, boolean requiresTypes, List<String> keywords) {
+        this.description = description;
         this.requiresTypes = requiresTypes;
         this.keywords = keywords;
     }
-
+    
     /**
      * Check whether a given string corresponds with the name of a valid target.
-     * @param name The name to find a matching target for.
+     * @param name The string for which to determine whether there is a match.
      * @return true if a matching target was found, false otherwise.
      */
-    public final static boolean isValidName(String name) {
-        if (Targets.get(name) != null) {
+    public final static boolean hasForName(String name) {
+        if (Target.forName(name) != null) {
             return true;
         }
         return false;
     }
 
     /**
-     * Return the target that corresponds with the given string.
-     * @param name The name to find a matching target for.
-     * @return a matching target, null otherwise.
+     * Return the target that matches the given string.
+     * 
+     * @param name The string to match against.
+     * @return The matching target (or null if there is none).
      */
-    public final static Targets get(String name) {
-        for (Targets t : Targets.values()) {
-            if (t.toString().equalsIgnoreCase(name))
-                return t;
-        }
-        return null;
+    public static Target forName(String name) {
+        return (Target)Target.match(name, Target.values());
     }
 
     /**
-     * Print the name of this target property.
+     * Return the description.
      */
     @Override
     public String toString() {
-        return this.name;
+        return this.description;
     }
-
+    
+    /**
+     * Given a string and a list of candidate objects, return the first
+     * candidate that matches, or null if no candidate matches.
+     * 
+     * @param string     The string to match against candidates.
+     * @param candidates The candidates to match the string against.
+     */
+    public static Object match(final String string, final Object[] candidates) {
+        return Arrays.stream(candidates)
+                .filter(e -> (e.toString().equalsIgnoreCase(string)))
+                .findAny().orElse(null);
+    }
 }
