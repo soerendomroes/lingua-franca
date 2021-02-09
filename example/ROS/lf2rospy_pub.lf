@@ -1,0 +1,58 @@
+/*
+* Based on C example@ https://github.com/icyphy/lingua-franca/blob/master/example/C/ROS/BasicROS.lf
+*/
+
+target Python {
+	fast: true,
+    keepalive: true,
+    logging: DEBUG
+};
+
+preamble {=
+    import rclpy
+    from rclpy.node import Node
+    from std_msgs.msg import String
+=}
+
+reactor MessageGenerator {
+    preamble {=
+        class MinimalPublisher(Node):
+
+            def __init__(self):
+                super().__init__('minimal_publisher')
+                self.publisher_ = self.create_publisher(String, 'topic', 10)
+    =}
+
+    state minimal_publisher({=None=});
+    state i(0);
+    timer t(0, 500 msec);
+
+    reaction(startup) {=      
+       print("Executing startup.")
+       args="None"
+       rclpy.init(args=args)
+       self.minimal_publisher = MinimalPublisher()
+    =}
+
+    reaction(t) {=        
+        msg = String()
+        print("Executing timer reaction.")
+        msg.data = 'Hello World: %d' % self.i
+        self.minimal_publisher.publisher_.publish(msg)
+        self.minimal_publisher.get_logger().info('Publishing: "%s"' % msg.data)
+        self.i += 1   
+
+        rclpy.spin(self.minimal_publisher)
+        print("Done executing timer reaction.")
+    =}
+    
+    reaction(shutdown) {=
+        print( "Executing shutdown reaction." )
+        minimal_publisher.destroy_node()
+        rclpy.shutdown()
+    =}
+}
+
+main reactor MainContainer {
+    sender = new MessageGenerator();
+}
