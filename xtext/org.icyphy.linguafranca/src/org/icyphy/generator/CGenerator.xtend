@@ -69,7 +69,7 @@ import org.icyphy.linguaFranca.Variable
 import static extension org.icyphy.ASTUtils.*
 
 /** 
- * Generator for C target. This class generates C code definining each reactor
+ * Generator for C target. This class generates C code defining each reactor
  * class given in the input .lf file and imported .lf files. The generated code
  * has the following components:
  * 
