@@ -573,7 +573,57 @@ void handle_next_event_tag(federate_t* fed) {
     LOG_PRINT("RTI received from federate %d the Next Event Tag (NET) (%lld, %u).",
             fed->id, fed->next_event.time - start_time,
             fed->next_event.microstep);
-                        
+
+
+    // FIXME: Do starvation analysis for centralized coordination.
+	// Specifically, if the event queue is empty on *all* federates, this
+	// can become known to the RTI which can then stop execution.
+	// Hence, it will no longer be necessary to force keepalive to be true
+	// for all federated execution. With centralized coordination, we could
+	// allow keepalive to be either true or false and could get the same
+	// behavior with centralized coordination as with unfederated execution.
+
+    // Check if all federates have completed the pending events.
+    // If there is starvation, send a stop request to all federates.
+    bool starvation = true;
+    for (int i = 0; i < NUMBER_OF_FEDERATES; i++) {
+    	// Check if the NET of the federate is FOREVER.
+    	// If not, starvation does not occur.
+    	if (compare_tags(federates[i].next_event, FOREVER_TAG) < 0) {
+    		starvation = false;
+    	}
+    	printf("*** The NET for fed %d is (%lld, %u).\n", i, federates[i].next_event.time, federates[i].next_event.microstep);
+    }
+    if (starvation) {
+    	// RTI broadcast a stop message
+    	printf("*** Starvation is true. Time to shut down!\n");
+
+		// Set stop time to the largest completed tag by the federates
+    	instant_t stop_time = NEVER;
+		for (int k = 0; k < NUMBER_OF_FEDERATES; k++) {
+			if (federates[k].completed.time > stop_time)
+				stop_time = federates[k].completed.time;
+		}
+		unsigned char stop_request_buffer[1 + sizeof(instant_t)];
+		stop_request_buffer[0] = STOP_REQUEST;
+		encode_ll(stop_time, &(stop_request_buffer[1]));
+
+    	// Iterate over federates and send each the STOP_REQUEST message
+		for (int i = 0; i < NUMBER_OF_FEDERATES; i++) {
+			// FIXME: figure out why this check is needed.
+			if (federates[i].state == NOT_CONNECTED) {
+				_lf_rti_mark_federate_requesting_stop(&federates[i]);
+				continue;
+			}
+			write_to_socket_errexit(federates[i].socket, 1 + sizeof(instant_t), stop_request_buffer,
+					"RTI failed to broadcast message to federate %d.", federates[i].id);
+		}
+		LOG_PRINT("RTI broadcasted to federates STOP_REQUEST with time %lld.", stop_time - start_time);
+
+		pthread_mutex_unlock(&rti_mutex);
+		return;
+    }
+
     // Check to see whether we can reply now with a time advance grant.
     // If the federate has no upstream federates, then it does not wait for
     // nor expect a reply. It just proceeds to advance time.
