@@ -559,6 +559,11 @@ typedef struct federate_t {
     tag_t completed;        // The largest logical tag completed by the federate (or NEVER if no LTC has been received).
     tag_t last_granted;     // The maximum tag that has been granted so far (or NEVER if none granted)
     tag_t next_event;       // Most recent NET received from the federate (or NEVER if none received).
+
+    						// FIXME: have an "in-flight msg" flag as RTI forwards the message?
+    						//			Disable in-flight only when receiving a LTC message with
+    						//			a tag greater than or equal to the forwarded message.
+
     instant_t time_advance; // Most recent TAN received from the federate (or NEVER if none received).
     fed_state_t state;      // State of the federate.
     int* upstream;          // Array of upstream federate ids.

@@ -576,11 +576,18 @@ bool handle_starvation() {
 	//		  3. (Done) Do not exit when keepalive is true.
 	//			 FIXME: keepalive is actually always true in federated execution.
 
+	// FIXME: Make stop_tag a global variable. Make federates accept command line args.
 	// Logical time tags here are logical time since epoch.
+	// FIXME: New msg type "EMPTY_QUEUE". We can assume the received time is timeout time.
+	//			RTI treats starvation msg like NET. Distinguish between events at the stop time
+	//			and empty queue.
+	// FIXME: Federates do not need to have keepalive set to true. RTI can coordinate shutdown
+	//			in case of starvation. If physical action, keepalive true.
+
 #ifdef TIMEOUT
 	tag_t stop_tag = (tag_t){ .time = TIMEOUT + start_time, .microstep = 0 };
 #else
-	tag_t stop_tag = (tag_t){ .time = FOREVER, .microstep = 0 };
+	tag_t stop_tag = FOREVER_TAG;
 #endif
 	LOG_PRINT("*** Stop time is %lld.", stop_tag.time);
 	bool starvation = true;
@@ -595,6 +602,8 @@ bool handle_starvation() {
 		LOG_PRINT("*** The NET for fed %d is (%lld, %u).", i, event_tag.time, event_tag.microstep);
 	}
 	if (starvation) {
+		// FIXME: use _LF_RTI_BROADCAST_STOPTAG
+
 		// RTI broadcast a stop message
 		LOG_PRINT("*** Starvation identified. RTI will broadcast STOP_REQUEST to all federates.");
 
@@ -650,9 +659,10 @@ void handle_next_event_tag(federate_t* fed) {
             fed->id, fed->next_event.time - start_time,
             fed->next_event.microstep);
 
+
     // FIXME: Not a good location to perform this check.
     //			When a forwarding message is in-flight,
-    //			the receiving federate can send back a
+    //			the receiving federate can still send back a
     //			FOREVER TAG. RTI would think that there
     //			is starvation.
     //			Potential solution: RTI keeps track of
@@ -661,6 +671,8 @@ void handle_next_event_tag(federate_t* fed) {
     //			If any of the federates has pending messages,
     //			(the pending status remains until msg is enqueued (need an ACK msg?))
     //			do not consider starvation.
+    //	FIXME: Consider TAN?
+    //
     // Check and handle starvation if applicable
     if (handle_starvation()) {
     	pthread_mutex_unlock(&rti_mutex);
