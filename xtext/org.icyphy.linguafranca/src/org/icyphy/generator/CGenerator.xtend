@@ -935,11 +935,15 @@ class CGenerator extends GeneratorBase {
                 #define _LF_CLOCK_SYNC_EXCHANGES_PER_INTERVAL «config.clockSyncOptions.trials»
             ''')
         }
+        
+        // Define number of federates and target properties.
         pr(rtiCode, '''
             #ifdef NUMBER_OF_FEDERATES
             #undefine NUMBER_OF_FEDERATES
             #endif
             #define NUMBER_OF_FEDERATES «federates.length»
+            «config.keepalive?"#define KEEPALIVE":""»
+            «config.timeout !== null?"#define TIMEOUT " + config.timeout.toNanoSeconds:""»
             #include "core/rti.c"
             int main(int argc, char* argv[]) {
         ''')
