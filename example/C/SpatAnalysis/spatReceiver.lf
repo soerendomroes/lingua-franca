@@ -9,7 +9,7 @@
 
 target C {
     threads: 1, // Must use threaded implementation so schedule is thread safe.
-    flags: "-I/usr/local/include -L/usr/local/lib -g -lpaho-mqtt3c src-gen/core/util.c ",
+    flags: "-I/usr/local/include -g src-gen/core/net-util.c",
     timeout: 60 secs,
     keepalive: true
 };
