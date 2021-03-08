@@ -26,11 +26,11 @@ import java.util.List
 import org.eclipse.core.resources.ResourcesPlugin
 import org.eclipse.core.runtime.Path
 import org.eclipse.emf.common.util.URI
-import org.icyphy.linguaFranca.TimeUnit
 import org.icyphy.TargetProperty.BuildType
 import org.icyphy.TargetProperty.ClockSyncMode
 import org.icyphy.TargetProperty.CoordinationType
 import org.icyphy.TargetProperty.LogLevel
+import org.icyphy.linguaFranca.TimeUnit
 
 /** 
  * A class for keeping the current target configuration.
@@ -94,6 +94,16 @@ class Configuration {
      * The default is 'centralized'.
      */
     public CoordinationType coordination = CoordinationType.CENTRALIZED
+
+    /**
+     * Docker options.
+     */
+    public DockerOptions dockerOptions = null;
+    
+    /**
+     * Coordination options.
+     */
+    public CoordinationOptions coordinationOptions = new CoordinationOptions();
 
     /**
      * If true, configure the execution environment such that it does not
@@ -293,4 +303,31 @@ class ClockSyncOptions {
      * The default is null.
      */
     public TimeValue testOffset;
+}
+
+/**
+ * Settings related to coordination of federated execution.
+ */
+class CoordinationOptions {
+    
+    /**
+     * For centralized coordination, if a federate has a physical action that can trigger
+     * an output, directly or indirectly, then it will send NET (next event tag) messages
+     * to the RTI periodically as its physical clock advances. This option sets the amount
+     * of time to wait between sending such messages. Increasing this value results in
+     * downstream federates that lag further behind physical time (if the "after" delays
+     * are insufficient).
+     * The default is null, which means it is up the implementation to choose an interval.
+     */
+    public TimeValue advance_message_interval = null;
+}
+
+/**
+ * Settings related to Docker options.
+ */
+class DockerOptions {
+    /**
+     * The base image and tag from which to build the Docker image. The default is "alpine:latest".
+     */
+    public String from = "alpine:latest"
 }

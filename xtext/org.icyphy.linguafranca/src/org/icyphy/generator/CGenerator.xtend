@@ -60,6 +60,7 @@ import org.icyphy.linguaFranca.Reaction
 import org.icyphy.linguaFranca.Reactor
 import org.icyphy.linguaFranca.ReactorDecl
 import org.icyphy.linguaFranca.StateVar
+import org.icyphy.linguaFranca.Time
 import org.icyphy.linguaFranca.Timer
 import org.icyphy.linguaFranca.TriggerRef
 import org.icyphy.linguaFranca.TypedVariable
@@ -67,7 +68,6 @@ import org.icyphy.linguaFranca.VarRef
 import org.icyphy.linguaFranca.Variable
 
 import static extension org.icyphy.ASTUtils.*
-import org.icyphy.linguaFranca.TimeUnit
 
 /** 
  * Generator for C target. This class generates C code definining each reactor
@@ -380,10 +380,9 @@ class CGenerator extends GeneratorBase {
         }
         
         // If there are federates, copy the required files for that.
-        // Also, create two RTI C files, one that launches the federates
-        // and one that does not.
+        // Also, create the RTI C file and the launcher script.
         if (federates.length > 1) {
-            coreFiles.addAll("rti.c", "rti.h", "federate.c", "clock-sync.h", "clock-sync.c")
+            coreFiles.addAll("rti.c", "rti.h", "federate.c", "federate.h", "clock-sync.h", "clock-sync.c")
             createFederateRTI()
             createLauncher(coreFiles)
         }
@@ -415,8 +414,6 @@ class CGenerator extends GeneratorBase {
 
                 startTimeStep = new StringBuilder()
                 startTimers = new StringBuilder(commonStartTimers)
-                // This should go first in the start_timers function.
-                pr(startTimers, "synchronize_with_other_federates();")
             }
         
             // Build the instantiation tree if a main reactor is present.
@@ -646,9 +643,9 @@ class CGenerator extends GeneratorBase {
                 // downstream federates, will notify the RTI
                 // that the specified logical time is complete.
                 pr('''
-                    void logical_tag_complete(instant_t timestep, microstep_t microstep) {
+                    void logical_tag_complete(tag_t tag_to_send) {
                         «IF federates.length > 1 && config.coordination == CoordinationType.CENTRALIZED»
-                            _lf_logical_tag_complete(timestep, microstep);
+                            _lf_logical_tag_complete(tag_to_send);
                         «ENDIF»
                     }
                 ''')
@@ -657,11 +654,11 @@ class CGenerator extends GeneratorBase {
                 // if there is only one federate or will notify the RTI,
                 // if necessary, of the next event time.
                 pr('''
-                    tag_t next_event_tag(instant_t time, microstep_t microstep) {
-                        «IF federates.length > 1»
-                            return __next_event_tag(time, microstep);
+                    tag_t send_next_event_tag(tag_t tag, bool wait_for_reply) {
+                        «IF isFederatedAndCentralized»
+                            return _lf_send_next_event_tag(tag, wait_for_reply);
                         «ELSE»
-                            return («targetTagType») {  .time = time, .microstep = microstep };
+                            return tag;
                         «ENDIF»
                     }
                 ''')
@@ -680,43 +677,22 @@ class CGenerator extends GeneratorBase {
                     }
                 ''')
                 
-                // Generate the termination function.
-                // If there are federates, this will resign from the federation.
-                if (federates.length > 1) {
-                    // FIXME: Send EOF on any open P2P sockets.
-                    // FIXME: Check return values.
-                    pr('''
-                        void __termination() {
-                            stop_trace();
-                            // Check for all outgoing physical connections in
-                            // _lf_federate_sockets_for_outbound_p2p_connections and 
-                            // if the socket ID is not -1, the connection is still open. 
-                            // Send an EOF by closing the socket here.
-                            for (int i=0; i < NUMBER_OF_FEDERATES; i++) {
-                                // Close outbound connections
-                                if (_lf_federate_sockets_for_outbound_p2p_connections[i] != -1) {
-                                    close(_lf_federate_sockets_for_outbound_p2p_connections[i]);
-                                    _lf_federate_sockets_for_outbound_p2p_connections[i] = -1;
-                                }
-                            }
-                            «IF federate.inboundP2PConnections.length > 0»
-                                «/* FIXME: This pthread_join causes the program to freeze indefinitely on MacOS. */»
-                                void* thread_return;
-                                info_print("Waiting for incoming connections to close.");
-                                pthread_join(_lf_inbound_p2p_handling_thread_id, &thread_return);
-                            «ENDIF»
-                            unsigned char message_marker = RESIGN;
-                            write_to_socket_errexit(_lf_rti_socket_TCP, 1, &message_marker, 
-                                    "Federate %d failed to send RESIGN message to the RTI.", _lf_my_fed_id);
-                        }
-                    ''')
-                } else {
-                    pr("void __termination() {stop_trace();}");
+                // Generate an empty termination function for non-federated
+                // execution. For federated execution, an implementation is
+                // provided in federate.c.  That implementation will resign
+                // from the federation and close any open sockets.
+                if (federates.length <= 1) {
+                    pr("void terminate_execution() {}");
                 }
             }
             val targetFile = srcGenPath + File.separator + cFilename
             writeSourceCodeToFile(getCode().getBytes(), targetFile)
             
+            // Create docker file.
+            if (config.dockerOptions !== null) {
+                writeDockerFile(filename)
+            }
+
             // If this code generator is directly compiling the code, compile it now so that we
             // clean it up after, removing the #line directives after errors have been reported.
             if (!config.noCompile && config.buildCommands.nullOrEmpty) {
@@ -740,6 +716,57 @@ class CGenerator extends GeneratorBase {
                 
         // In case we are in Eclipse, make sure the generated code is visible.
         refreshProject()
+    }
+    
+    /**
+     * Write a Dockerfile for the current federate as given by filename.
+     * The file will go into src-gen/filename.Dockerfile.
+     * If there is no main reactor, then no Dockerfile will be generated
+     * (it wouldn't be very useful).
+     * @param The root filename (without any extension).
+     */
+    def writeDockerFile(String filename) {
+        if (this.mainDef === null) {
+            return
+        }
+        
+        var srcGenPath = getSrcGenPath()
+        val dockerFile = srcGenPath + File.separator + filename + '.Dockerfile'
+        val contents = new StringBuilder()
+        
+        // If a dockerfile exists, remove it.
+        var file = new File(dockerFile)
+        if (file.exists) {
+            file.delete
+        }
+        // The Docker configuration uses gcc, so config.compiler is ignored here.
+        var compileCommand = '''gcc «config.compilerFlags.join(" ")» src-gen/«filename».c -o bin/«filename»'''
+        if (!config.buildCommands.nullOrEmpty) {
+            compileCommand = config.buildCommands.join(' ')
+        }
+        var additionalFiles = ''
+        if (!config.fileNames.nullOrEmpty) {
+            additionalFiles = '''COPY "«config.fileNames.join('" "')»" "src-gen/"'''
+        }
+        pr(contents, '''
+            # Generated docker file for «filename».lf in «directory».
+            # For instructions, see: https://github.com/icyphy/lingua-franca/wiki/Containerized-Execution
+            FROM «config.dockerOptions.from»
+            WORKDIR /lingua-franca
+            COPY src-gen/core src-gen/core
+            COPY "src-gen/«filename».c" "src-gen/ctarget.h" "src-gen/"
+            «additionalFiles»
+            RUN set -ex && \
+                apk add --no-cache gcc musl-dev && \
+                mkdir bin && \
+                «compileCommand» && \
+                apk del gcc musl-dev && \
+                rm -rf src-gen
+            # Use ENTRYPOINT not CMD so that command-line arguments go through
+            ENTRYPOINT ["./bin/«filename»"]
+        ''')
+        writeSourceCodeToFile(contents.toString.getBytes, dockerFile)
+        println("Dockerfile written to " + dockerFile)
     }
     
     /**
@@ -798,13 +825,28 @@ class CGenerator extends GeneratorBase {
             pr('''
                 // ***** Start initializing the federated execution. */
             ''')
+            
+            if (isFederatedAndDecentralized) {
+                val reactorInstance = main.getChildReactorInstance(federate.instantiation)
+                for (param : reactorInstance.parameters) {
+                    if (param.name.equalsIgnoreCase("STP") && param.type.isTime) {
+                        val stp = param.init.get(0).getTimeValue
+                        if (stp !== null) {                        
+                            pr('''
+                                set_stp_offset(«stp.timeInTargetLanguage»);
+                            ''')
+                        }
+                    }
+                }
+            }
+            
             // Set indicator variables that specify whether the federate has
             // upstream logical connections.
             if (federate.dependsOn.size > 0) {
-                pr('__fed_has_upstream  = true;')
+                pr('_fed.has_upstream  = true;')
             }
             if (federate.sendsTo.size > 0) {
-                pr('__fed_has_downstream = true;')
+                pr('_fed.has_downstream = true;')
             }
             // Set global variable identifying the federate.
             pr('''_lf_my_fed_id = «federate.id»;''');
@@ -815,14 +857,14 @@ class CGenerator extends GeneratorBase {
             val numberOfOutboundConnections  = federate.outboundP2PConnections.length;
             
             pr('''
-                _lf_number_of_inbound_p2p_connections = «numberOfInboundConnections»;
-                _lf_number_of_outbound_p2p_connections = «numberOfOutboundConnections»;
+                _fed.number_of_inbound_p2p_connections = «numberOfInboundConnections»;
+                _fed.number_of_outbound_p2p_connections = «numberOfOutboundConnections»;
             ''')
             if (numberOfInboundConnections > 0) {
                 pr('''
                     // Initialize the array of socket for incoming connections to -1.
                     for (int i = 0; i < NUMBER_OF_FEDERATES; i++) {
-                        _lf_federate_sockets_for_inbound_p2p_connections[i] = -1;
+                        _fed.sockets_for_inbound_p2p_connections[i] = -1;
                     }
                 ''')                    
             }
@@ -830,7 +872,7 @@ class CGenerator extends GeneratorBase {
                 pr('''
                     // Initialize the array of socket for outgoing connections to -1.
                     for (int i = 0; i < NUMBER_OF_FEDERATES; i++) {
-                        _lf_federate_sockets_for_outbound_p2p_connections[i] = -1;
+                        _fed.sockets_for_outbound_p2p_connections[i] = -1;
                     }
                 ''')                    
             }
@@ -843,7 +885,7 @@ class CGenerator extends GeneratorBase {
             }
             
             pr('''
-                // Connect to the RTI. This sets _lf_rti_socket_TCP and _lf_rti_socket_UDP.
+                // Connect to the RTI. This sets _fed.socket_TCP_RTI and _lf_rti_socket_UDP.
                 connect_to_rti("«federationRTIProperties.get('host')»", «federationRTIProperties.get('port')»);
             ''');            
             
@@ -854,7 +896,7 @@ class CGenerator extends GeneratorBase {
                     || config.clockSyncOptions.localFederatesOn)
             ) {
                 pr('''
-                    synchronize_initial_physical_clock_with_rti(_lf_rti_socket_TCP);
+                    synchronize_initial_physical_clock_with_rti(_fed.socket_TCP_RTI);
                 ''')
             }
         
@@ -871,7 +913,7 @@ class CGenerator extends GeneratorBase {
                     // connect_to_federate for each outbound physical connection at the same
                     // time that the new thread is listening for such connections for inbound
                     // physical connections. The thread will live until termination.
-                    pthread_create(&_lf_inbound_p2p_handling_thread_id, NULL, handle_p2p_connections_from_federates, NULL);
+                    pthread_create(&_fed.inbound_p2p_handling_thread_id, NULL, handle_p2p_connections_from_federates, NULL);
                 ''')
             }
                             
@@ -944,7 +986,10 @@ class CGenerator extends GeneratorBase {
         // federates.
         // FIXME: No support below for some federates to be FAST and some REALTIME.
         pr(rtiCode, '''
-            process_args(argc, argv);
+            if (!process_args(argc, argv)) {
+                // Processing command-line arguments failed.
+                return -1;
+            }
             printf("Starting RTI for %d federates in federation ID %s\n", NUMBER_OF_FEDERATES, federation_id);
             for (int i = 0; i < NUMBER_OF_FEDERATES; i++) {
                 initialize_federate(i);
@@ -952,6 +997,10 @@ class CGenerator extends GeneratorBase {
                     federates[i].mode = FAST;
                 «ENDIF»
             }
+            #pragma GCC diagnostic push
+            #pragma GCC diagnostic ignored "-Wunused-variable"
+            interval_t candidate_tmp;
+            #pragma GCC diagnostic pop
         ''')
         // Initialize the arrays indicating connectivity to upstream and downstream federates.
         for(federate : federates) {
@@ -972,7 +1021,6 @@ class CGenerator extends GeneratorBase {
                 for (upstreamFederate : federate.dependsOn.keySet) {
                     pr(rtiCode, '''
                         federates[«federate.id»].upstream[«count»] = «upstreamFederate.id»;
-                        federates[«federate.id»].upstream_delay[«count»] = 0LL;
                     ''')
                     // The minimum delay calculation needs to be made in the C code because it
                     // may depend on parameter values.
@@ -981,13 +1029,34 @@ class CGenerator extends GeneratorBase {
                     // When that is done, they will need to be in scope here.
                     val delays = federate.dependsOn.get(upstreamFederate)
                     if (delays !== null) {
+                        // There is at least one delay, so find the minimum.
+                        // If there is no delay at all, this is encoded as NEVER.
+                        pr(rtiCode, '''
+                            federates[«federate.id»].upstream_delay[«count»] = NEVER;
+                            candidate_tmp = FOREVER;
+                        ''')
                         for (delay : delays) {
+                            var delayTime = delay.getTargetTime
+                            if (delay.parameter !== null) {
+                                // The delay is given as a parameter reference. Find its value.
+                                delayTime = ASTUtils.getInitialTimeValue(delay.parameter).timeInTargetLanguage
+                            }
                             pr(rtiCode, '''
-                                if (federates[«federate.id»].upstream_delay[«count»] < «delay.getTargetTime») {
-                                    federates[«federate.id»].upstream_delay[«count»] = «delay.getTargetTime»;
+                                if («delayTime» < candidate_tmp) {
+                                    candidate_tmp = «delayTime»;
                                 }
                             ''')
                         }
+                        pr(rtiCode, '''
+                            if (candidate_tmp < FOREVER) {
+                                federates[«federate.id»].upstream_delay[«count»] = candidate_tmp;
+                            }
+                        ''')
+                    } else {
+                        // Use NEVER to encode no delay at all.
+                        pr(rtiCode, '''
+                            federates[«federate.id»].upstream_delay[«count»] = NEVER;
+                        ''')
                     }
                     count++;
                 }
@@ -1037,6 +1106,11 @@ class CGenerator extends GeneratorBase {
                 new File(srcGenPath + File.separator + cFilename));
         fOut.write(rtiCode.toString().getBytes())
         fOut.close()
+        
+        // Write a Dockerfile for the RTI.
+        if (config.dockerOptions !== null) {
+            writeDockerFile(filename + '_RTI')
+        }
     }
     
     /** Create the launcher shell scripts. This will create one or two file
@@ -2074,7 +2148,7 @@ class CGenerator extends GeneratorBase {
         }
 
         // Next handle inputs.
-        for (input : reactor.inputs) {            
+        for (input : reactor.allInputs) {            
             createTriggerT(body, input, triggerMap, constructorCode, destructorCode)
         }
     }
@@ -3147,7 +3221,7 @@ class CGenerator extends GeneratorBase {
     /** Generate code to instantiate the specified reactor instance and
      *  initialize it.
      *  @param instance A reactor instance.
-     *  @param federate A federate name to conditionally generate code by
+     *  @param federate A federate instance to conditionally generate code by
      *   contained reactors or null if there are no federates.
      */
     def void generateReactorInstance(ReactorInstance instance, FederateInstance federate) {
@@ -3486,20 +3560,35 @@ class CGenerator extends GeneratorBase {
             }
         }
         
-        // FIXME: A demonstration of the usage of findOutputsConnectedToPhysicalActions
-        // Should be removed/changed fairly soon
-        if (federates.length > 1) {
+        // If this program is federated with centralized coordination and this reactor
+        // instance is a federate, then check
+        // for outputs that depend on physical actions so that null messages can be
+        // sent to the RTI.
+        if (isFederatedAndCentralized && instance.definition === federate.instantiation) {
             val outputDelayMap = federate.findOutputsConnectedToPhysicalActions(instance)
             var minDelay = TimeValue.MAX_VALUE;
+            var outputFound = null as Output;
             for (output : outputDelayMap.keySet) {
                 val outputDelay = outputDelayMap.get(output)
                 if (outputDelay.isEarlierThan(minDelay)) {
                     minDelay = outputDelay
+                    outputFound = output
                 }
             }
             if (minDelay != TimeValue.MAX_VALUE) {
-                println("Found minimum delay from a physical action to output for reactor " + instance.name + 
-                        " to be " + minDelay.toString())
+                // Unless silenced, issue a warning.
+                if (config.coordinationOptions.advance_message_interval === null) {
+                    reportWarning(outputFound, '''
+                            Found a path from a physical action to output for reactor "«instance.name»". 
+                            The amount of delay is «minDelay.toString()».
+                            With centralized coordination, this can result in a large number of messages to the RTI.
+                            Consider refactoring the code so that the output does not depend on the physical action,
+                            or consider using decentralized coordination. To silence this warning, set the target
+                            parameter cooridiation-options with a value like {advance-message-interval: 10 msec}"''')
+                }
+                pr(initializeTriggerObjects, '''
+                    _fed.min_delay_from_physical_action_to_federate_output = «minDelay.timeInTargetLanguage»;
+                ''')
             }
         }
         
@@ -3939,16 +4028,12 @@ class CGenerator extends GeneratorBase {
         val sendRef = generateVarRef(sendingPort)
         val receiveRef = generateVarRef(receivingPort)
         val result = new StringBuilder()
-        result.append('''
-            // Receiving from «sendRef» in federate «sendingFed.name» to «receiveRef» in federate «receivingFed.name»
-            «IF isFederatedAndDecentralized»
-                DEBUG_PRINT("Received a message with intended tag of (%lld, %u).", «receiveRef»->intended_tag.time, «receiveRef»->intended_tag.microstep);
-            «ENDIF»
-        ''')
         if (isFederatedAndDecentralized) {
             result.append('''
+                // Receiving from «sendRef» in federate «sendingFed.name» to «receiveRef» in federate «receivingFed.name»
                 // Transfer the intended tag from the action to the port
                 «receiveRef»->intended_tag = «action.name»->trigger->intended_tag;
+                DEBUG_PRINT("Received a message with intended tag of (%lld, %u).", «receiveRef»->intended_tag.time, «receiveRef»->intended_tag.microstep);
             ''')
         }
         if (isTokenType(type)) {
@@ -4015,26 +4100,50 @@ class CGenerator extends GeneratorBase {
         // the current timestamp. If after delay is 0,
         // send_timed_message will use the current tag +
         // a microstep as the timestamp of the outgoing message.
-        // FIXME: implementation of tag is currently incomplete
-        // in the C target. Therefore, the nuances regarding
-        // the microstep delay are currently not implemented.
         var String additionalDelayString = '-1';
         // Name of the next immediate destination of this message
         var String next_destination_name = '''"federate «receivingFed.id»"'''
         if (delay !== null) {
-            additionalDelayString = (new TimeValue(delay.interval, delay.unit)).toNanoSeconds.toString;
-            // FIXME: handle the case where the delay is a parameter.
+            if (delay.parameter !== null) {
+                // The parameter has to be parameter of the main reactor.
+                // And that value has to be a Time.
+                val value = delay.parameter.init.get(0)
+                if (value.time !== null) {
+                    additionalDelayString = (new TimeValue(value.time.interval, value.time.unit))
+                            .toNanoSeconds.toString;
+                } else if (value.literal !== null) {
+                    // If no units are given, e.g. "0", then use the literal.
+                    additionalDelayString = value.literal;
+                } else {
+                    // This should have been caught by the validator.
+                    reportError(delay.parameter, "Parameter is required to be a time to be used in an after clause.")
+                }
+            } else {
+                additionalDelayString = (new TimeValue(delay.interval, delay.unit)).toNanoSeconds.toString;
+            }
         }
         if (isPhysical) {
-            socket = '''_lf_federate_sockets_for_outbound_p2p_connections[«receivingFed.id»]'''
+            socket = '''_fed.sockets_for_outbound_p2p_connections[«receivingFed.id»]'''
             messageType = "P2P_MESSAGE"
+            // Check if the socket is still valid first
+            result.append('''
+                if (_fed.sockets_for_outbound_p2p_connections[«receivingFed.id»] == -1) {
+                    return;
+                }
+            ''')
         } else if (config.coordination === CoordinationType.DECENTRALIZED) {
-            socket = '''_lf_federate_sockets_for_outbound_p2p_connections[«receivingFed.id»]'''
+            socket = '''_fed.sockets_for_outbound_p2p_connections[«receivingFed.id»]'''
             messageType = "P2P_TIMED_MESSAGE"
+            // Check if the socket is still valid first
+            result.append('''
+                if (_fed.sockets_for_outbound_p2p_connections[«receivingFed.id»] == -1) {
+                    return;
+                }
+            ''')
         } else {
             // Logical connection
             // Send the message via rti
-            socket = '''_lf_rti_socket_TCP'''
+            socket = '''_fed.socket_TCP_RTI'''
             messageType = "TIMED_MESSAGE"
             next_destination_name = '''"the RTI"'''
         }
@@ -4097,21 +4206,21 @@ class CGenerator extends GeneratorBase {
         
         if (isFederated) {
             // FIXME: Instead of checking
-            // #ifdef _LF_IS_FEDERATED, we could
+            // #ifdef FEDERATED, we could
             // use #if (NUMBER_OF_FEDERATES > 1)
             // To me, the former is more accurate.
             pr('''
-                #define _LF_IS_FEDERATED
+                #define FEDERATED
             ''')
             if (config.coordination === CoordinationType.CENTRALIZED) {
                 // The coordination is centralized.
                 pr('''
-                    #define _LF_COORD_CENTRALIZED
+                    #define FEDERATED_CENTRALIZED
                 ''')                
             } else if (config.coordination === CoordinationType.DECENTRALIZED) {
                 // The coordination is decentralized
                 pr('''
-                    #define _LF_COORD_DECENTRALIZED
+                    #define FEDERATED_DECENTRALIZED
                 ''')
             }
         }
@@ -4119,6 +4228,10 @@ class CGenerator extends GeneratorBase {
         includeTargetLanguageHeaders()
 
         pr('#define NUMBER_OF_FEDERATES ' + federates.length);
+        
+        if (config.coordinationOptions.advance_message_interval !== null) {
+            pr('#define ADVANCE_MESSAGE_INTERVAL ' + config.coordinationOptions.advance_message_interval.timeInTargetLanguage)
+        }
                         
         // Handle target parameters.
         // First, if there are federates, then ensure that threading is enabled.
@@ -4578,6 +4691,14 @@ class CGenerator extends GeneratorBase {
     ) {
         val structType = variableStructType(input, decl)
         val inputType = input.inferredType
+        
+        // We define various local variables that may or may not be used by a reaction.
+        // To suppress "unused variable" warnings, we use a pragma.
+        pr(builder, '''
+            #pragma GCC diagnostic push
+            #pragma GCC diagnostic ignored "-Wunused-variable"
+        ''')
+        
         // Create the local variable whose name matches the input name.
         // If the input has not been declared mutable, then this is a pointer
         // to the upstream output. Otherwise, it is a copy of the upstream output,
@@ -4685,8 +4806,6 @@ class CGenerator extends GeneratorBase {
         // for a variable-width multiport, which is not currently supported.
         // It will be -2 if it is not multiport.
         pr(builder, '''
-            #pragma GCC diagnostic push
-            #pragma GCC diagnostic ignored "-Wunused-variable"
             int «input.name»_width = self->__«input.name»__width;
             #pragma GCC diagnostic pop
         ''')
@@ -4983,6 +5102,14 @@ class CGenerator extends GeneratorBase {
     protected def isFederatedAndDecentralized() {
         if (isFederated &&
             config.coordination === CoordinationType.DECENTRALIZED) {
+            return true
+        }
+        return false
+    }
+    
+    protected def isFederatedAndCentralized() {
+        if (isFederated &&
+            config.coordination === CoordinationType.CENTRALIZED) {
             return true
         }
         return false
