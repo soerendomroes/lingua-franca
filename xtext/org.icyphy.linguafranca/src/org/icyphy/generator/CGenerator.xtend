@@ -60,7 +60,6 @@ import org.icyphy.linguaFranca.Reaction
 import org.icyphy.linguaFranca.Reactor
 import org.icyphy.linguaFranca.ReactorDecl
 import org.icyphy.linguaFranca.StateVar
-import org.icyphy.linguaFranca.Time
 import org.icyphy.linguaFranca.Timer
 import org.icyphy.linguaFranca.TriggerRef
 import org.icyphy.linguaFranca.TypedVariable
@@ -396,10 +395,12 @@ class CGenerator extends GeneratorBase {
         
         var commonCode = code;
         var commonStartTimers = startTimers;
+        var compilationSucceeded = true
         for (federate : federates) {
             startTimeStepIsPresentCount = 0
             startTimeStepTokens = 0
             
+            // If federated, append the federate name to the file name.
             // Only generate one output if there is no federation.
             if (!federate.isSingleton) {                
                 filename = baseFilename + '_' + federate.name
@@ -524,7 +525,7 @@ class CGenerator extends GeneratorBase {
                     val triggers = new LinkedList<String>()
                     for (action : federate.networkMessageActions) {
                         // Find the corresponding ActionInstance.
-                        val actionInstance = main.getActionInstance(action)
+                        val actionInstance = main.lookupActionInstance(action)
                         triggers.add(triggerStructName(actionInstance))
                     }
                     var actionTableCount = 0
@@ -622,8 +623,12 @@ class CGenerator extends GeneratorBase {
                 // Generate function to schedule timers for all reactors.
                 pr("void __initialize_timers() {")
                 indent()
-                if (config.tracing) {
-                    pr('''start_trace("«filename».lft");''') // .lft is for Lingua Franca trace
+                if (config.tracing !== null) {
+                    var traceFileName = filename;
+                    if (config.tracing.traceFileName !== null) {
+                        traceFileName = config.tracing.traceFileName;
+                    }
+                    pr('''start_trace("«traceFileName».lft");''') // .lft is for Lingua Franca trace
                 }
                 if (timerCount > 0) {
                     pr('''
@@ -696,7 +701,9 @@ class CGenerator extends GeneratorBase {
             // If this code generator is directly compiling the code, compile it now so that we
             // clean it up after, removing the #line directives after errors have been reported.
             if (!config.noCompile && config.buildCommands.nullOrEmpty) {
-                runCCompiler(directory, filename, true)
+                if (!runCCompiler(directory, filename, true)) {
+                    compilationSucceeded = false
+                }
                 writeSourceCodeToFile(getCode.removeLineDirectives.getBytes(), targetFile)
             }
         }
@@ -713,7 +720,11 @@ class CGenerator extends GeneratorBase {
                 compileRTI()
             }
         }
-                
+        
+        // If compilation failed, remove any bin files that may have been created.
+        if (!compilationSucceeded) {
+            removeBinFiles()
+        }
         // In case we are in Eclipse, make sure the generated code is visible.
         refreshProject()
     }
@@ -1113,41 +1124,43 @@ class CGenerator extends GeneratorBase {
         }
     }
     
-    /** Create the launcher shell scripts. This will create one or two file
-     *  in the output path (bin directory). The first has name equal to
-     *  the filename of the source file without the ".lf" extension.
-     *  This will be a shell script that launches the
-     *  RTI and the federates.  If, in addition, either the RTI or any
-     *  federate is mapped to a particular machine (anything other than
-     *  the default "localhost" or "0.0.0.0"), then this will generate
-     *  a shell script in the bin  with name filename_distribute.sh
-     *  that copies the relevant source files to the remote host and compiles
-     *  them so that they are ready to execute using the launcher.
+    /**
+     * Create the launcher shell scripts. This will create one or two files
+     * in the output path (bin directory). The first has name equal to
+     * the filename of the source file without the ".lf" extension.
+     * This will be a shell script that launches the
+     * RTI and the federates.  If, in addition, either the RTI or any
+     * federate is mapped to a particular machine (anything other than
+     * the default "localhost" or "0.0.0.0"), then this will generate
+     * a shell script in the bin directory with name filename_distribute.sh
+     * that copies the relevant source files to the remote host and compiles
+     * them so that they are ready to execute using the launcher.
      * 
-     *  A precondition for this to work is that the user invoking this
-     *  code generator can log into the remote host without supplying
-     *  a password. Specifically, you have to have installed your
-     *  public key (typically found in ~/.ssh/id_rsa.pub) in
-     *  ~/.ssh/authorized_keys on the remote host. In addition, the
-     *  remote host must be running an ssh service.
-     *  On an Arch Linux system using systemd, for example, this means
-     *  running:
+     * A precondition for this to work is that the user invoking this
+     * code generator can log into the remote host without supplying
+     * a password. Specifically, you have to have installed your
+     * public key (typically found in ~/.ssh/id_rsa.pub) in
+     * ~/.ssh/authorized_keys on the remote host. In addition, the
+     * remote host must be running an ssh service.
+     * On an Arch Linux system using systemd, for example, this means
+     * running:
      * 
-     *      sudo systemctl <start|enable> ssh.service
+     *     sudo systemctl <start|enable> ssh.service
      * 
-     *  Enable means to always start the service at startup, whereas
-     *  start means to just start it this once.
-     *  On MacOS, open System Preferences from the Apple menu and 
-     *  click on the "Sharing" preference panel. Select the checkbox
-     *  next to "Remote Login" to enable it.
+     * Enable means to always start the service at startup, whereas
+     * start means to just start it this once.
      * 
-     *  In addition, every host must have OpenSSL installed, with at least
-     *  version 1.1.1a.  You can check the version with
+     * On MacOS, open System Preferences from the Apple menu and 
+     * click on the "Sharing" preference panel. Select the checkbox
+     * next to "Remote Login" to enable it.
      * 
-     *      openssl version
+     * In addition, every host must have OpenSSL installed, with at least
+     * version 1.1.1a.  You can check the version with
      * 
-     *  @param coreFiles The files from the core directory that must be
-     *   copied to the remote machines.
+     *     openssl version
+     * 
+     * @param coreFiles The files from the core directory that must be
+     *  copied to the remote machines.
      */
     def createLauncher(ArrayList<String> coreFiles) {
         // NOTE: It might be good to use screen when invoking the RTI
@@ -1398,6 +1411,37 @@ class CGenerator extends GeneratorBase {
         }
     }
     
+    /**
+     * Remove files in the bin directory that may have been created.
+     * Call this if a compilation occurs so that files from a previous
+     * version do not accidentally get executed.
+     */
+    def removeBinFiles() {
+        var outPath = getBinGenPath()
+        // Delete executable file or launcher script, if any.
+        var file = new File(outPath + File.separator + filename)
+        if (file.exists) file.delete
+
+        // Deleted distribution file, if any.
+        file = new File(outPath + File.separator + filename + '_distribute.sh')
+        if (file.exists) file.delete
+
+        // Deleted RTI file, if any.
+        file = new File(outPath + File.separator + filename + '_RTI')
+        if (file.exists) file.delete
+        
+        for (federate : federates) {
+            startTimeStepIsPresentCount = 0
+            startTimeStepTokens = 0
+            
+            // Only generate one output if there is no federation.
+            if (!federate.isSingleton) {                
+                file = new File(outPath + File.separator + filename + '_' + federate.name)
+                if (file.exists) file.delete
+            }
+        }
+    }
+
     /** 
      * Generate a reactor class definition for the specified federate.
      * A class definition has four parts:
@@ -2753,6 +2797,9 @@ class CGenerator extends GeneratorBase {
         // Handle inputs that get sent data from a reaction rather than from
         // another contained reactor and reactions that are triggered by an
         // output of a contained reactor.
+        // Note that there may be more than one reaction reacting to the same
+        // port so we have to avoid listing the port more than once.
+        val portsSeen = new LinkedHashSet<PortInstance>();
         for (reaction : instance.reactions) {
             if (federate === null || federate.containsReaction(
                 instance.definition.reactorClass.toDefinition,
@@ -2787,18 +2834,34 @@ class CGenerator extends GeneratorBase {
                         }
                     }
                 }
+                // Find outputs of contained reactors that have token types and therefore
+                // need to have their reference counts decremented.
                 for (port : reaction.sources) {
-                    if (port.definition instanceof Output) {
+                    if (port.definition instanceof Output && !portsSeen.contains(port)) {
+                        portsSeen.add(port as PortInstance)
                         // This reaction is receiving data from the port.
                         if (isTokenType((port.definition as Output).inferredType)) {
-                            pr(startTimeStep, '''
-                                __tokens_with_ref_count[«startTimeStepTokens»].token
-                                        = &«containerSelfStructName»->__«port.parent.name».«port.name»->token;
-                                __tokens_with_ref_count[«startTimeStepTokens»].is_present
-                                        = &«containerSelfStructName»->__«port.parent.name».«port.name»->is_present;
-                                __tokens_with_ref_count[«startTimeStepTokens»].reset_is_present = false;
-                            ''')
-                            startTimeStepTokens++
+                            if (port instanceof MultiportInstance) {
+                                pr(startTimeStep, '''
+                                    for (int i = 0; i < «port.width»; i++) {
+                                        __tokens_with_ref_count[«startTimeStepTokens» + i].token
+                                                = &«containerSelfStructName»->__«port.parent.name».«port.name»[i]->token;
+                                        __tokens_with_ref_count[«startTimeStepTokens» + i].is_present
+                                                = &«containerSelfStructName»->__«port.parent.name».«port.name»[i]->is_present;
+                                        __tokens_with_ref_count[«startTimeStepTokens» + i].reset_is_present = false;
+                                    }
+                                ''')
+                                startTimeStepTokens += port.width
+                            } else {
+                                pr(startTimeStep, '''
+                                    __tokens_with_ref_count[«startTimeStepTokens»].token
+                                            = &«containerSelfStructName»->__«port.parent.name».«port.name»->token;
+                                    __tokens_with_ref_count[«startTimeStepTokens»].is_present
+                                            = &«containerSelfStructName»->__«port.parent.name».«port.name»->is_present;
+                                    __tokens_with_ref_count[«startTimeStepTokens»].reset_is_present = false;
+                                ''')
+                                startTimeStepTokens++
+                            }
                         }
                     }
                 }
@@ -3199,7 +3262,7 @@ class CGenerator extends GeneratorBase {
         // If tracing is turned on, record the address of this reaction
         // in the _lf_trace_object_descriptions table that is used to generate
         // the header information in the trace file.
-        if (config.tracing) {
+        if (config.tracing !== null) {
             var description = getShortenedName(instance)
             var nameOfSelfStruct = selfStructName(instance)
             pr(builder, '''
@@ -3244,6 +3307,15 @@ class CGenerator extends GeneratorBase {
                 «structType»* «nameOfSelfStruct»[«instance.bankMembers.size»];
             ''')
             return
+        }
+
+        // If this reactor is an instance in a bank of federates, then only generate an
+        // instance if the bank index of the reactor matches the bank index of the federate.
+        if (federate.instantiation === instance.definition    // Is a top-level federate.
+            && federate.instantiation.widthSpec !== null      // Is in a bank of federates.
+            && federate.bankPosition != instance.bankIndex    // Bank position does not match.
+        ) {
+            return;
         }
 
         // Generate the instance self struct containing parameters, state variables,
@@ -3372,7 +3444,7 @@ class CGenerator extends GeneratorBase {
                         pr(initializeTriggerObjects, '''
                             __shutdown_reactions[«shutdownReactionCount++»] = &«nameOfSelfStruct»->___reaction_«reactionCount»;
                         ''')
-                        if (config.tracing) {
+                        if (config.tracing !== null) {
                             val description = getShortenedName(instance)
                             pr(initializeTriggerObjects, '''
                                 _lf_register_trace_event(«nameOfSelfStruct», &(«nameOfSelfStruct»->___shutdown),
@@ -4001,6 +4073,8 @@ class CGenerator extends GeneratorBase {
      * @param receivingPortID The ID of the destination port.
      * @param sendingFed The sending federate.
      * @param receivingFed The destination federate.
+     * @param receivingBankIndex The receiving federate's bank index, if it is in a bank.
+     * @param receivingChannelIndex The receiving federate's channel index, if it is a multiport.
      * @param type The type.
      */
     override generateNetworkReceiverBody(
@@ -4010,6 +4084,8 @@ class CGenerator extends GeneratorBase {
         int receivingPortID, 
         FederateInstance sendingFed,
         FederateInstance receivingFed,
+        int receivingBankIndex,
+        int receivingChannelIndex,
         InferredType type
     ) {
         // Adjust the type of the action and the receivingPort.
@@ -4026,7 +4102,11 @@ class CGenerator extends GeneratorBase {
         }
 
         val sendRef = generateVarRef(sendingPort)
-        val receiveRef = generateVarRef(receivingPort)
+        var receiveRef = generateVarRef(receivingPort)
+        // If the receiving port is a multiport, index it.
+        if ((receivingPort.variable as Port).widthSpec !== null && receivingChannelIndex >= 0) {
+            receiveRef = receiveRef + '[' + receivingChannelIndex + ']'
+        }
         val result = new StringBuilder()
         if (isFederatedAndDecentralized) {
             result.append('''
@@ -4057,6 +4137,8 @@ class CGenerator extends GeneratorBase {
      * @param receivingPort The ID of the destination port.
      * @param receivingPortID The ID of the destination port.
      * @param sendingFed The sending federate.
+     * @param sendingBankIndex The bank index of the sending federate, if it is a bank.
+     * @param sendingChannelIndex The channel index of the sending port, if it is a multiport.
      * @param receivingFed The destination federate.
      * @param type The type.
      * @param isPhysical Indicates whether the connection is physical or not
@@ -4067,12 +4149,18 @@ class CGenerator extends GeneratorBase {
         VarRef receivingPort,
         int receivingPortID, 
         FederateInstance sendingFed,
+        int sendingBankIndex,
+        int sendingChannelIndex,
         FederateInstance receivingFed,
         InferredType type,
         boolean isPhysical,
         Delay delay
     ) { 
-        val sendRef = generateVarRef(sendingPort)
+        var sendRef = generateVarRef(sendingPort)
+        // If the sending port is a multiport, index it.
+        if ((sendingPort.variable as Port).getWidthSpec() !== null && sendingChannelIndex >= 0) {
+            sendRef = sendRef + '[' + sendingChannelIndex + ']'
+        }
         val receiveRef = generateVarRef(receivingPort)
         val result = new StringBuilder()
         result.append('''
@@ -4170,9 +4258,7 @@ class CGenerator extends GeneratorBase {
             // both have the same endianess. Otherwise, you have to use protobufs or some other serialization scheme.
             result.append('''
                 size_t message_length = «sendRef»->token->length * «sendRef»->token->element_size;
-                «sendRef»->token->ref_count++;
                 «sendingFunction»(«commonArgs», (unsigned char*) «sendRef»->value);
-                __done_using(«sendRef»->token);
             ''')
         } else {
             // Handle native types.
@@ -4301,11 +4387,15 @@ class CGenerator extends GeneratorBase {
      *  uniformly across all target languages.
      */
     protected def includeTargetLanguageHeaders() {
-        if (config.tracing) {
-            pr('#define LINGUA_FRANCA_TRACE')
+        if (config.tracing !== null) {
+            var filename = "";
+            if (config.tracing.traceFileName !== null) {
+                filename = config.tracing.traceFileName;
+            }
+            pr('#define LINGUA_FRANCA_TRACE ' + filename)
         }
         pr('#include "ctarget.h"')
-        if (config.tracing) {
+        if (config.tracing !== null) {
             pr('#include "core/trace.c"')            
         }
     }
