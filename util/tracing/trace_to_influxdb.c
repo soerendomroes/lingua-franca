@@ -120,6 +120,10 @@ THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 /** Struct identifying the influx client. */
 influx_client_t influx_client;
 influx_v2_client_t influx_v2_client;
+
+/** To tag events by host */ 
+char* hostname = NULL;
+
 /**
  * Print a usage message.
  */
@@ -177,6 +181,7 @@ size_t read_and_write_trace() {
             INFLUX_MEAS(trace_event_names[trace[i].event_type]),
             INFLUX_TAG("Reactor", reactor_name),
             INFLUX_TAG("Reaction", reaction_name),
+            INFLUX_TAG("Host Name", hostname),
             INFLUX_F_INT("Worker", trace[i].worker),
             INFLUX_F_INT("Logical Time", trace[i].logical_time),
             INFLUX_F_INT("Microstep", trace[i].microstep),
@@ -200,11 +205,18 @@ int main(int argc, char* argv[]) {
         exit(0);
     }
     // Defaults.
-    influx_v2_client.token = NULL;
+    influx_v2_client.token = "4eh8Vat0IjiCxd2_YZGsGJnWfMyCh9GWw-ILcMKV8UJnRqyOSBqh2DOL3We5-EClWCPQiuTCHy1-zu_Dquvqdw==";
     influx_v2_client.host = "localhost";
     influx_v2_client.port = 8086;
-    influx_v2_client.org = "iCyPhy"; 
-    influx_v2_client.bucket = "test";
+    influx_v2_client.org = "denso"; 
+    influx_v2_client.bucket = "drivePoc";
+
+    // required for v1
+    influx_client.usr = "ravi";
+    influx_client.pwd = "denso";
+    influx_client.db = influx_v2_client.bucket;
+    influx_client.host = influx_v2_client.host;
+    influx_client.port = influx_v2_client.port;
 
     char* filename = NULL;
 
@@ -262,7 +274,9 @@ int main(int argc, char* argv[]) {
     }
 
     open_files(filename, NULL);
-
+    
+    hostname = strstr(filename, "client_");
+    
     if (read_header() >= 0) {
         size_t num_records = 0, result;
         while ((result = read_and_write_trace()) != 0) {
