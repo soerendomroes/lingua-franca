@@ -40,7 +40,15 @@ import java.util.List
 
 /**
  * A graph with vertices that are instantiations and edges that denote
- * dependencies between them.
+ * dependencies between them. A "dependency" from reactor class A to 
+ * reactor class B (A depends on B) means that A instantiates within 
+ * it at least one instance of B. Note that there a potentially 
+ * confusing and subtle distinction here between an "instantiation" 
+ * and an "instance". They are not the same thing at all. An
+ * "instantiation" is an AST node representing a statement like
+ * `a = new A();`. This can result in many instances of reactor 
+ * class A (if the containing reactor class is instantiated multiple times).
+ * 
  * @author{Marten Lohstroh <marten@berkeley.edu>}
  */
 class InstantiationGraph extends PrecedenceGraph<Reactor> {
@@ -90,6 +98,10 @@ class InstantiationGraph extends PrecedenceGraph<Reactor> {
     new (Resource resource, boolean detectCycles) {
         val instantiations = resource.allContents.toIterable.filter(
             Instantiation)
+        val main = resource.allContents.toIterable.filter(Reactor).findFirst[it.isMain || it.isFederated]
+        if (main !== null) {
+            this.addNode(main)
+        }
         for (i : instantiations) {
             i.buildGraph(newHashSet)
         }
@@ -130,7 +142,7 @@ class InstantiationGraph extends PrecedenceGraph<Reactor> {
             this.reactorToInstantiation.put(reactor, instantiation)
             this.reactorToDecl.put(reactor, decl)
 
-            if (!container.isMain && !container.isFederated) { // FIXME: Why exclude these?
+            if (container !== null) {
                 this.addEdge(container, reactor)
             } else {
                 this.addNode(reactor)

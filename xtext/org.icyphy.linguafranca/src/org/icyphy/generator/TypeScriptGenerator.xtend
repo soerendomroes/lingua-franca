@@ -54,7 +54,8 @@ import org.icyphy.linguaFranca.VarRef
 import org.icyphy.linguaFranca.Variable
 
 import static extension org.icyphy.ASTUtils.*
-import org.icyphy.TargetProperty.LogLevel
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 
 /** Generator for TypeScript target.
  *
@@ -65,52 +66,52 @@ import org.icyphy.TargetProperty.LogLevel
  */
 class TypeScriptGenerator extends GeneratorBase {
 
-    ////////////////////////////////////////////
-    //// Private variables
+    /**
+     * Path to the TypeScript library files (on the CLASSPATH).
+     */
+    static val String LIB_PATH = "/lib/TS"
+    
+    /**
+     * Default imports for importing all the core classes and helper classes
+     * for CLI argument handling.
+     */
+    static val DEFAULT_IMPORTS =  '''import commandLineArgs from 'command-line-args'
+    import commandLineUsage from 'command-line-usage'
+    import {Args as __Args, Present, Parameter as __Parameter, State as __State, Variable as __Variable, Read, Triggers as __Triggers, ReadWrite, Write, Action as __Action, Startup as __Startup, Sched, Timer as __Timer, Reactor as __Reactor, Port as __Port, OutPort as __OutPort, InPort as __InPort, App as __App} from './core/reactor'
+    import {Reaction as __Reaction} from './core/reaction'
+    import {FederatedApp as __FederatedApp} from './core/federation'
+    import {TimeUnit, TimeValue, Tag as __Tag, Origin as __Origin} from './core/time'
+    import {Log} from './core/util'
+    import {ProcessedCommandLineArgs as __ProcessedCommandLineArgs, CommandLineOptionDefs as __CommandLineOptionDefs, CommandLineUsageDefs as __CommandLineUsageDefs, CommandLineOptionSpec as __CommandLineOptionSpec, unitBasedTimeValueCLAType as __unitBasedTimeValueCLAType, booleanCLAType as __booleanCLAType} from './core/cli'
+    
+    '''
+  
+    /**
+     * Names of the configuration files to check for and copy to the generated 
+     * source package root if they cannot be found in the source directory.
+     */
+    static val CONFIG_FILES = #["package.json", "tsconfig.json", "babel.config.js"]
+    
+    /**
+     * Files to be copied from the reactor-ts submodule into the generated
+     * source directory. 
+     */
+    static val RUNTIME_FILES = #["cli.ts", "command-line-args.d.ts", "command-line-usage.d.ts",
+            "component.ts", "federation.ts", "reaction.ts", "reactor.ts",
+            "microtime.d.ts", "nanotimer.d.ts", "time.ts", "ulog.d.ts", "util.ts"]
+    
+    /**
+     * Set of parameters (AST elements) associated with the main reactor.
+     */
+    var mainParameters = new HashSet<Parameter>()
 
     new () {
         super()
-        // set defaults for federate compilation
-        config.compiler = "gcc"
-        config.compilerFlags.add("-O2")
+        // Set defaults for federate compilation.
+        targetConfig.compiler = "gcc"
+        targetConfig.compilerFlags.add("-O2")
     }
-    
-    // Path to the generated project directory
-    var String projectPath
-    
-    // Path to reactor-ts files
-    var String reactorTSPath
-    
-    // Path to the src directory
-    var String srcGenPath
-    
-    // Path to the output dist directory
-    var String outPath
-    
-    // Path to a default configuration files
-    var String configPath
-    
-    // Path to core reactor-ts files
-    var String reactorTSCorePath
-    
-    // Path to the tsc command within the node modules directory
-    var String tscPath
-    
-    // FIXME: The CGenerator expects these next two paths to be
-    // relative to the directory, not the project folder
-    // so for now I just left it that way. A different
-    // directory structure for RTI and TS code may be
-    // preferable.
-        
-    // Path to src-gen directory for C code
-    var String cSrcGenPath
-    
-    // Path to bin directory for compiled C code
-    var String cOutPath
-    
-    // List of validly typed parameters of the main reactor for 
-    // custom command line arguments
-    var customCLArgs = new HashSet<Parameter>()
+
 
     /** Generate TypeScript code from the Lingua Franca model contained by the
      *  specified resource. This is the main entry point for code
@@ -119,15 +120,12 @@ class TypeScriptGenerator extends GeneratorBase {
      *  @param fsa The file system access (used to write the result).
      *  @param context FIXME: Undocumented argument. No idea what this is.
      */
-    override void doGenerate(
-        Resource resource,
-        IFileSystemAccess2 fsa,
-        IGeneratorContext context
-    ) {
+    override void doGenerate(Resource resource, IFileSystemAccess2 fsa,
+        IGeneratorContext context) {
+        
         super.doGenerate(resource, fsa, context)
         
-        // Set variables for paths
-        analyzePaths()
+        if (generatorErrorsOccurred) return;
         
         // Generate imports for protocol buffer definitions
         // Note that the preamble is generated as part of
@@ -139,19 +137,19 @@ class TypeScriptGenerator extends GeneratorBase {
            
         // Generate code for each reactor. 
         for (r : reactors) {
-           r.toDefinition.generateReactor()
+           r.toDefinition.generateReactor() // FIXME: put each reactor class in its own file instead.
         }
         
         // Create output directories if they don't yet exist
-        var dir = new File(projectPath)
+        // FIXME: move cleanup and initialize code to FileConfig
+        // FIXME: I saw some glitches that had to do with the path "existing" but it not being a directory. Add checks for this.
+        
+        var dir = fileConfig.getSrcGenPkgPath.toFile
         if (!dir.exists()) dir.mkdirs()
-        dir = new File(srcGenPath)
-        if (!dir.exists()) dir.mkdirs()
-        dir = new File(outPath)
+        dir = fileConfig.getSrcGenPath.toFile
         if (!dir.exists()) dir.mkdirs()
 
         // Perform distinct code generation into distinct files for each federate.
-        val baseFilename = filename
         var commonCode = code
         var String federateFilename
 
@@ -161,13 +159,13 @@ class TypeScriptGenerator extends GeneratorBase {
             
             // Only generate one output if there is no federation.
             if (!federate.isSingleton) {
-                federateFilename = baseFilename + '_' + federate.name
+                federateFilename = fileConfig.name + '_' + federate.name
                 // Clear out previously generated code,
                 // but keep the reactor class definitions
                 // and the preamble.
                 code = new StringBuilder(commonCode)
             } else {
-                federateFilename = baseFilename
+                federateFilename = fileConfig.name
             }
         
             // Build the instantiation tree if a main reactor is present.
@@ -183,49 +181,31 @@ class TypeScriptGenerator extends GeneratorBase {
             val jsFilename = federateFilename + ".js";
 
             // Delete source previously produced by the LF compiler.
-            var file = new File(srcGenPath + File.separator + tsFilename)
-            if (file.exists) {
-                file.delete
+            val generated = fileConfig.getSrcGenPath.resolve(tsFilename).toFile
+            if (generated.exists) {
+                generated.delete
             }
 
             // Delete .js previously output by TypeScript compiler
-            file = new File(outPath + File.separator + jsFilename)
-            if (file.exists) {
-                file.delete
+            val compiled = fileConfig.getSrcGenPath.resolve("dist").resolve(jsFilename).toFile
+            if (compiled.exists) {
+                compiled.delete
             }
 
             // Write the generated code to the output file.
             var fOut = new FileOutputStream(
-                new File(srcGenPath + File.separator + tsFilename));
+                fileConfig.getSrcGenPath.resolve(tsFilename).toFile);
             fOut.write(getCode().getBytes())
             fOut.close()
         }
-
-        // Copy the required library files into the src directory
-        // so they may be compiled as part of the TypeScript project.
-        // This requires that the TypeScript submodule has been installed.
-        var reactorTSCoreFiles = newArrayList("reactor.ts", "federation.ts",
-            "cli.ts", "command-line-args.d.ts", "command-line-usage.d.ts", 
-            "microtime.d.ts", "nanotimer.d.ts", "time.ts", "ulog.d.ts", "util.ts")
-
-        for (file : reactorTSCoreFiles) {
-            copyReactorTSCoreFile(srcGenPath, file)
-        }
-        
-        // Only run npm install if we had to copy over the default package.json.
-        var boolean runNpmInstall
-        var File packageJSONFile = new File(directory + File.separator + "package.json")
-        if (packageJSONFile.exists()) {
-            runNpmInstall = false
-        } else {
-            runNpmInstall = true
+    
+        for (file : org.icyphy.generator.TypeScriptGenerator.RUNTIME_FILES) {
+            copyFileFromClassPath("/lib/TS/reactor-ts/src/core/" + file, fileConfig.getSrcGenPath.resolve("core").resolve(file).toString)
         }
 
-        // Copy default versions of config files into project if
+        // Install default versions of config files into project if
         // they don't exist.       
-        createDefaultConfigFile(directory, "package.json")
-        createDefaultConfigFile(projectPath, "tsconfig.json")
-        createDefaultConfigFile(projectPath, "babel.config.js")
+        this.initializeProjectConfiguration()
         
         // NOTE: (IMPORTANT) at least on my mac, the instance of eclipse running this program did not have
         // the complete PATH variable needed to find the command npm. I had
@@ -235,16 +215,12 @@ class TypeScriptGenerator extends GeneratorBase {
         // ~/.bash_profile file that specifies suitable paths, the command should
         // work.
         
-        // Install npm modules only if the default package.json was copied over.
-        
-        if (runNpmInstall) {
-            val npmInstall = createCommand("npm", #["install"])
+            val npmInstall = createCommand("pnpm", #["install"], fileConfig.getSrcGenPkgPath)
             if (npmInstall === null || npmInstall.executeCommand() !== 0) {
                 reportError(resource.findTarget, "ERROR: npm install command failed."
                     + "\nFor installation instructions, see: https://www.npmjs.com/get-npm")
                 return
             }
-        }
         
         refreshProject()
         
@@ -252,19 +228,19 @@ class TypeScriptGenerator extends GeneratorBase {
         // Assumes protoc compiler has been installed on this machine
         
         // First test if the project directory contains any .proto files
-        if (config.protoFiles.size != 0) {
-            // Working example: protoc --plugin=protoc-gen-ts=./node_modules/.bin/protoc-gen-ts --js_out=import_style=commonjs,binary:./generated --ts_out=./generated *.proto
+        if (targetConfig.protoFiles.size != 0) {
+            // For more info, see: https://www.npmjs.com/package/ts-protoc-gen
             
-            // FIXME: Should we include protoc as a submodule? If so, how to invoke it?
-            // protoc is commonly installed in /usr/local/bin, which sadly is not by
-            // default on the PATH for a Mac.
+            // FIXME: Check whether protoc is installed and provides hints how to install if it cannot be found.
             val List<String> protocArgs = newLinkedList
+            val tsOutPath = fileConfig.srcPath.relativize(fileConfig.getSrcGenPath)
+            
             protocArgs.addAll(
-                "--plugin=protoc-gen-ts=./node_modules/.bin/protoc-gen-ts",
-                "--js_out=import_style=commonjs,binary:" + outPath,
-                "--ts_out=" + srcGenPath)
-            protocArgs.addAll(config.protoFiles.fold(newLinkedList, [list, file | list.add(file); list]))
-            val protoc = createCommand("protoc", protocArgs)
+                "--plugin=protoc-gen-ts=" + fileConfig.getSrcGenPkgPath.resolve("node_modules").resolve(".bin").resolve("protoc-gen-ts"),
+                "--js_out=import_style=commonjs,binary:"+tsOutPath,
+                "--ts_out=" + tsOutPath)
+            protocArgs.addAll(targetConfig.protoFiles.fold(newLinkedList, [list, file | list.add(file); list]))
+            val protoc = createCommand("protoc", protocArgs, fileConfig.srcPath)
                 
             if (protoc === null) {
                 return
@@ -272,12 +248,14 @@ class TypeScriptGenerator extends GeneratorBase {
 
             val returnCode = protoc.executeCommand()
             if (returnCode == 0) {
-                val nameSansProto = filename.substring(0, filename.length - 6)
-                config.compileAdditionalSources.add("src-gen" + File.separator + nameSansProto +
-                    ".pb-c.c")
-
-                config.compileLibraries.add('-l')
-                config.compileLibraries.add('protobuf-c')
+                // FIXME: this code makes no sense. It is removing 6 chars from a file with a 3-char extension
+//                val nameSansProto = fileConfig.name.substring(0, fileConfig.name.length - 6)
+//               
+//                targetConfig.compileAdditionalSources.add(
+//                this.fileConfig.getSrcGenPath.resolve(nameSansProto + ".pb-c.c").toString)
+//
+//                targetConfig.compileLibraries.add('-l')
+//                targetConfig.compileLibraries.add('protobuf-c')
             } else {
                 reportError("protoc returns error code " + returnCode)    
             }
@@ -288,32 +266,19 @@ class TypeScriptGenerator extends GeneratorBase {
         
 
         // Invoke the compiler on the generated code.
-        
-        // Working example: src-gen/Minimal.ts --outDir bin --module CommonJS --target es2018 --esModuleInterop true --lib esnext,dom --alwaysStrict true --strictBindCallApply true --strictNullChecks true
-        // Must compile to ES2015 or later and include the dom library.
-        // Working command without a tsconfig.json:
-        // compileCommand.addAll(tscPath,  relativeSrcFilename, 
-        //      "--outDir", "js", "--module", "CommonJS", "--target", "es2018", "--esModuleInterop", "true",
-        //      "--lib", "esnext,dom", "--alwaysStrict", "true", "--strictBindCallApply", "true",
-        //      "--strictNullChecks", "true");
-        
-        // FIXME: Perhaps add a compileCommand option to the target directive, as in C.
-        // Here, we just use a generic compile command.
-
         println("Type Checking")
-        // If $tsc is run with no arguments, it uses the tsconfig file.
-        val tsc = createCommand(tscPath)
+        val tsc = createCommand("npm", #["run", "check-types"], fileConfig.getSrcGenPkgPath, findCommandEnv("npm"))
         if (tsc !== null) {
-            tsc.directory(new File(projectPath))
             if (tsc.executeCommand() == 0) {
                 // Babel will compile TypeScript to JS even if there are type errors
                 // so only run compilation if tsc found no problems.
-                val babelPath = directory + File.separator + "node_modules" + File.separator + ".bin" + File.separator + "babel"
+                //val babelPath = codeGenConfig.outPath + File.separator + "node_modules" + File.separator + ".bin" + File.separator + "babel"
                 // Working command  $./node_modules/.bin/babel src-gen --out-dir js --extensions '.ts,.tsx'
                 println("Compiling")
-                val babel = createCommand(babelPath, #["src", "--out-dir", "dist", "--extensions", ".ts", "--ignore", "**/*.d.ts"])
+                val babel = createCommand("npm", #["run", "build"], fileConfig.getSrcGenPkgPath)
+                //createCommand(babelPath, #["src", "--out-dir", "dist", "--extensions", ".ts", "--ignore", "**/*.d.ts"], codeGenConfig.outPath)
+                
                 if (babel !== null) {
-                    babel.directory(new File(projectPath))
                     if (babel.executeCommand() == 0) {
                         println("SUCCESS (compiling generated TypeScript code)")                
                     } else {
@@ -325,20 +290,8 @@ class TypeScriptGenerator extends GeneratorBase {
             }
         }
 
-        // If this is a federated execution, generate the C RTI
-        
-        // FIXME: DO THE COMMENT BELOW
-        // Also, create two RTI C files, one that launches the federates
-        // and one that does not.
-        
+        // If this is a federated execution, generate C code for the RTI.
         if (federates.length > 1) {
-            
-            // Create C output directories (if they don't exist)            
-            dir = new File(cSrcGenPath)
-            if (!dir.exists()) dir.mkdirs()
-            dir = new File(cOutPath)
-            if (!dir.exists()) dir.mkdirs()
-            
             createFederateRTI()
 
             // Copy the required library files into the target file system.
@@ -348,7 +301,7 @@ class TypeScriptGenerator extends GeneratorBase {
             for (file : files) {
                 copyFileFromClassPath(
                     File.separator + "lib" + File.separator + "core" + File.separator + file,
-                    cSrcGenPath + File.separator + file
+                    fileConfig.getSrcGenPath.toString + File.separator + file
                 )
             }
             compileRTI()
@@ -385,11 +338,11 @@ class TypeScriptGenerator extends GeneratorBase {
         // NOTE: type parameters that are referenced in ports or actions must extend
         // Present in order for the program to type check.
         if (reactor.isMain()) {
-            pr("export class " + reactorName + " extends App {")
+            pr("class " + reactorName + " extends __App {")
         } else if (reactor.isFederated()) {
-            pr("export class " + reactorName + " extends FederatedApp {")
+            pr("class " + reactorName + " extends __FederatedApp {")
         } else {
-            pr("export class " + reactorName + " extends Reactor {")
+            pr("export class " + reactorName + " extends __Reactor {")
         }
         
         indent()
@@ -400,7 +353,7 @@ class TypeScriptGenerator extends GeneratorBase {
             arguments.add("keepAlive: boolean = false")
             arguments.add("fast: boolean = false")
         } else {
-            arguments.add("parent: Reactor")
+            arguments.add("parent: __Reactor")
         }
         
         // For TS, parameters are arguments of the class constructor.
@@ -495,32 +448,32 @@ class TypeScriptGenerator extends GeneratorBase {
 
             }
 
-            pr(timer.getName() + ": Timer;")
+            pr(timer.getName() + ": __Timer;")
             pr(reactorConstructor, "this." + timer.getName()
-                + " = new Timer(this, " + timerOffset + ", "+ timerPeriod + ");")
+                + " = new __Timer(this, " + timerOffset + ", "+ timerPeriod + ");")
             
         }     
 
         // Create properties for parameters
         for (param : reactor.parameters) {
-            pr(param.name + ": Parameter<" + param.targetType + ">;")
+            pr(param.name + ": __Parameter<" + param.targetType + ">;")
             pr(reactorConstructor, "this." + param.name +
-                " = new Parameter(" + param.name + ");" )
+                " = new __Parameter(" + param.name + ");" )
         }
 
         // Next handle states.
         for (stateVar : reactor.stateVars) {
             if (stateVar.isInitialized) {
                 pr(reactorConstructor, "this." + stateVar.name + ' = ' + 
-                    "new State(" + stateVar.targetInitializer + ');');
+                    "new __State(" + stateVar.targetInitializer + ');');
             } else {
                 pr(reactorConstructor, "this." + stateVar.name + ' = ' + 
-                    "new State(undefined);");
+                    "new __State(undefined);");
             }
         }
         
         for (stateVar : reactor.stateVars) {            
-            pr(stateVar.name + ': ' + "State<" + stateVar.getTargetType + '>;');            
+            pr(stateVar.name + ': ' + "__State<" + stateVar.getTargetType + '>;');            
         }
         // Next handle actions.
         for (action : reactor.actions) {
@@ -529,9 +482,9 @@ class TypeScriptGenerator extends GeneratorBase {
             // duplicate action if we included the one generated
             // by LF.
             if (action.name != "shutdown") {
-                pr(action.name + ": Action<" + getActionType(action) + ">;")
+                pr(action.name + ": __Action<" + getActionType(action) + ">;")
 
-                var actionArgs = "this, Origin." + action.origin  
+                var actionArgs = "this, __Origin." + action.origin  
                 if (action.minDelay !== null) {
                     // Actions in the TypeScript target are constructed
                     // with an optional minDelay argument which defaults to 0.
@@ -542,31 +495,31 @@ class TypeScriptGenerator extends GeneratorBase {
                     }
                 }
                 pr(reactorConstructor, "this." + 
-                    action.name + " = new Action<" + getActionType(action) +
+                    action.name + " = new __Action<" + getActionType(action) +
                     ">(" + actionArgs  + ");")
             }
         }
         
         // Next handle inputs.
         for (input : reactor.inputs) {
-            pr(input.name + ": " + "InPort<" + getPortType(input) + ">;")
-            pr(reactorConstructor, "this." + input.name + " = new InPort<"
+            pr(input.name + ": " + "__InPort<" + getPortType(input) + ">;")
+            pr(reactorConstructor, "this." + input.name + " = new __InPort<"
                 + getPortType(input) + ">(this);")
         }
         
         // Next handle outputs.
         for (output : reactor.outputs) {
-            pr(output.name + ": " + "OutPort<" + getPortType(output) + ">;")
-            pr(reactorConstructor, "this." + output.name + " = new OutPort<"
+            pr(output.name + ": " + "__OutPort<" + getPortType(output) + ">;")
+            pr(reactorConstructor, "this." + output.name + " = new __OutPort<"
                 + getPortType(output) + ">(this);")
         }
         
         // Next handle connections
         for (connection : reactor.connections) {
             var leftPortName = ""
-            // FIXME: This is not yet supporting parallel connections.
+            // FIXME: Add support for multiports.
             if (connection.leftPorts.length > 1) {
-                reportError(connection, "FIXME: parallel connections are not yet supported in the TypeScript target.")
+                reportError(connection, "Multiports are not yet supported in the TypeScript target.")
             } else {
                 if (connection.leftPorts.get(0).container !== null) {
                     leftPortName += connection.leftPorts.get(0).container.name + "."
@@ -575,7 +528,7 @@ class TypeScriptGenerator extends GeneratorBase {
             }
             var rightPortName = ""
             if (connection.leftPorts.length > 1) {
-                reportError(connection, "FIXME: parallel connections are not yet supported in the TypeScript target.")
+                reportError(connection, "Multiports are not yet supported in the TypeScript target.")
             } else {
                 if (connection.rightPorts.get(0).container !== null) {
                     rightPortName += connection.rightPorts.get(0).container.name + "."
@@ -690,7 +643,7 @@ class TypeScriptGenerator extends GeneratorBase {
                     var reactSignatureElementType = "";
                     
                     if (trigOrSource.variable instanceof Timer) {
-                        reactSignatureElementType = "Tag"
+                        reactSignatureElementType = "__Tag"
                     } else if (trigOrSource.variable instanceof Action) {
                         reactSignatureElementType = getActionType(trigOrSource.variable as Action)
                     } else if (trigOrSource.variable instanceof Port) {
@@ -720,7 +673,7 @@ class TypeScriptGenerator extends GeneratorBase {
                 if (effect.variable instanceof Timer) {
                     reportError("A timer cannot be an effect of a reaction")
                 } else if (effect.variable instanceof Action){
-                    reactSignatureElement += ": Schedule<" + getActionType(effect.variable as Action) + ">"
+                    reactSignatureElement += ": Sched<" + getActionType(effect.variable as Action) + ">"
                     schedActionSet.add(effect.variable as Action)
                 } else if (effect.variable instanceof Port){
                     reactSignatureElement += ": ReadWrite<" + getPortType(effect.variable as Port) + ">"
@@ -771,7 +724,7 @@ class TypeScriptGenerator extends GeneratorBase {
             for (param : reactor.parameters) {
                 
                 // Underscores are added to parameter names to prevent conflict with prologue
-                reactSignature.add("__" + param.name + ": Parameter<"
+                reactSignature.add("__" + param.name + ": __Parameter<"
                     + param.targetType + ">")
                 reactFunctArgs.add("this." + param.name)
                 
@@ -781,7 +734,7 @@ class TypeScriptGenerator extends GeneratorBase {
             // Add state to the react function
             for (state : reactor.stateVars) {
                 // Underscores are added to state names to prevent conflict with prologue
-                reactSignature.add("__" + state.name + ": State<"
+                reactSignature.add("__" + state.name + ": __State<"
                     + getStateType(state) + ">")
                 reactFunctArgs.add("this." + state.name )
                 
@@ -825,8 +778,8 @@ class TypeScriptGenerator extends GeneratorBase {
             // Write the reaction itself
             pr(reactorConstructor, "this.addReaction(")//new class<T> extends Reaction<T> {")
             reactorConstructor.indent()
-            pr(reactorConstructor, "new Triggers(" + reactionTriggers + "),")
-            pr(reactorConstructor, "new Args(" + reactFunctArgs + "),")
+            pr(reactorConstructor, "new __Triggers(" + reactionTriggers + "),")
+            pr(reactorConstructor, "new __Args(" + reactFunctArgs + "),")
             pr(reactorConstructor, "function (" + reactSignature + ") {")
             reactorConstructor.indent()
             pr(reactorConstructor, "// =============== START react prologue")
@@ -893,7 +846,9 @@ class TypeScriptGenerator extends GeneratorBase {
      *  @param reactor The parsed reactor data structure.
      */
     def generateReactor(Reactor reactor) {
-        generateReactorFederated(reactor, null)
+        if (!reactor.isFederated && !reactor.isMain) { // NOTE: Just to prevent NPE. This code makes no sense to me at all.
+            generateReactorFederated(reactor, null)
+        }
     }
 
     def generateArg(VarRef v) {
@@ -921,7 +876,7 @@ class TypeScriptGenerator extends GeneratorBase {
         var mainReactorParams = new StringJoiner(", ")
         for (parameter : defn.reactorClass.toDefinition.parameters) {
             
-            if (customCLArgs.contains(parameter)) {
+            if (mainParameters.contains(parameter)) {
                 mainReactorParams.add("__CL" + parameter.name)
             } else {
                 mainReactorParams.add("undefined")
@@ -1036,7 +991,7 @@ class TypeScriptGenerator extends GeneratorBase {
      */
     override generatePreamble() {
         super.generatePreamble
-        pr(preamble) 
+        pr(org.icyphy.generator.TypeScriptGenerator.DEFAULT_IMPORTS) 
         pr("") 
     }
     
@@ -1048,7 +1003,7 @@ class TypeScriptGenerator extends GeneratorBase {
         // command line arguments
         var Reactor mainReactor
         
-        for (reactor : resource.allContents.toIterable.filter(Reactor)) {
+        for (reactor : fileConfig.resource.allContents.toIterable.filter(Reactor)) {
             if (reactor.isMain || reactor.isFederated) {
                 mainReactor = reactor
             }
@@ -1065,22 +1020,22 @@ class TypeScriptGenerator extends GeneratorBase {
             var String customTypeLabel = null;
             var paramType = parameter.targetType
             if (paramType == "string") {
-                customCLArgs.add(parameter)
+                mainParameters.add(parameter)
                 //clTypeExtension.add(parameter.name + " : string")
                 customArgType = "String";
             } else if (paramType == "number") {
-                customCLArgs.add(parameter)
+                mainParameters.add(parameter)
                 //clTypeExtension.add(parameter.name + " : number")
                 customArgType = "Number";
             } else if (paramType == "boolean") {
-                customCLArgs.add(parameter)
+                mainParameters.add(parameter)
                 //clTypeExtension.add(parameter.name + " : boolean")
                 customArgType = "booleanCLAType";
                 customTypeLabel = '[true | false]'
             } else if (paramType == "TimeValue") {
-                customCLArgs.add(parameter)
-                //clTypeExtension.add(parameter.name + " : UnitBasedTimeValue | null")
-                customArgType = "unitBasedTimeValueCLAType"
+                mainParameters.add(parameter)
+                //clTypeExtension.add(parameter.name + " : TimeValue | null")
+                customArgType = "__unitBasedTimeValueCLAType"
                 customTypeLabel = "\'<duration> <units>\'"
             }
             // Otherwise don't add the parameter to customCLArgs
@@ -1093,14 +1048,14 @@ class TypeScriptGenerator extends GeneratorBase {
                     { name: '«parameter.name»',
                         type: «customArgType»,
                         typeLabel: "{underline «customTypeLabel»}",
-                        description: 'Custom argument. Refer to «sourceFile» for documentation.'
+                        description: 'Custom argument. Refer to «fileConfig.srcFile» for documentation.'
                     }
                     ''')
                 } else {
                     customArgs.add('''
                         { name: '«parameter.name»',
                             type: «customArgType»,
-                            description: 'Custom argument. Refer to «sourceFile» for documentation.'
+                            description: 'Custom argument. Refer to «fileConfig.srcFile» for documentation.'
                         }
                     ''')  
                 }
@@ -1112,24 +1067,24 @@ class TypeScriptGenerator extends GeneratorBase {
         val setParameters = '''
             // ************* App Parameters
             let __timeout: TimeValue | undefined = «getTimeoutTimeValue»;
-            let __keepAlive: boolean = «config.keepalive»;
-            let __fast: boolean = «config.fastMode»;
+            let __keepAlive: boolean = «targetConfig.keepalive»;
+            let __fast: boolean = «targetConfig.fastMode»;
             
             let __noStart = false; // If set to true, don't start the app.
             
             // ************* Custom Command Line Arguments
-            let __additionalCommandLineArgs : CommandLineOptionSpec = «customArgsList»;
-            let __customCommandLineArgs = CommandLineOptionDefs.concat(__additionalCommandLineArgs);
-            let __customCommandLineUsageDefs = CommandLineUsageDefs;
+            let __additionalCommandLineArgs : __CommandLineOptionSpec = «customArgsList»;
+            let __customCommandLineArgs = __CommandLineOptionDefs.concat(__additionalCommandLineArgs);
+            let __customCommandLineUsageDefs = __CommandLineUsageDefs;
             type __customCLTypeExtension = «clTypeExtensionDef»;
             __customCommandLineUsageDefs[1].optionList = __customCommandLineArgs;
             const __clUsage = commandLineUsage(__customCommandLineUsageDefs);
                          
             // Set App parameters using values from the constructor or command line args.
             // Command line args have precedence over values from the constructor
-            let __processedCLArgs: ProcessedCommandLineArgs & __customCLTypeExtension;
+            let __processedCLArgs: __ProcessedCommandLineArgs & __customCLTypeExtension;
             try {
-                __processedCLArgs =  commandLineArgs(__customCommandLineArgs) as ProcessedCommandLineArgs & __customCLTypeExtension;
+                __processedCLArgs =  commandLineArgs(__customCommandLineArgs) as __ProcessedCommandLineArgs & __customCLTypeExtension;
             } catch (e){
                 Log.global.error(__clUsage);
                 throw new Error("Command line argument parsing failed with: " + e);
@@ -1174,7 +1129,7 @@ class TypeScriptGenerator extends GeneratorBase {
                     throw new Error("'logging' command line argument is malformed.");
                 }
             } else {
-                Log.global.level = Log.levels.«getLoggingLevel»; // Default from target property.
+                Log.global.level = Log.levels.«targetConfig.logLevel.name»; // Default from target property.
             }
             
             // Help parameter (not a constructor parameter, but a command line option)
@@ -1224,7 +1179,7 @@ class TypeScriptGenerator extends GeneratorBase {
      */
     private def assignCustomCLArgs() {
         var code = new StringJoiner("\n")
-        for (parameter : customCLArgs) {
+        for (parameter : mainParameters) {
             code.add('''
                 let __CL«parameter.name»: «parameter.targetType» | undefined = undefined;
                 if (__processedCLArgs.«parameter.name» !== undefined) {
@@ -1246,7 +1201,7 @@ class TypeScriptGenerator extends GeneratorBase {
      */
     private def logCustomCLArgs() {
         var code = new StringJoiner("\n")
-        for (parameter : customCLArgs) {
+        for (parameter : mainParameters) {
             // We can't allow the programmer's parameter names
             // to cause the generation of variables with a "__" prefix
             // because they could collide with other variables.
@@ -1261,7 +1216,6 @@ class TypeScriptGenerator extends GeneratorBase {
         code.toString()
     }
 
-
     /** Given a representation of time that may possibly include units,
      *  return a string that TypeScript can recognize as a value.
      *  @param time Literal that represents a time value.
@@ -1270,37 +1224,15 @@ class TypeScriptGenerator extends GeneratorBase {
      */
     override timeInTargetLanguage(TimeValue value) {
         if (value.unit != TimeUnit.NONE) {
-            "new UnitBasedTimeValue(" + value.time + ", TimeUnit." + value.unit + ")"
+            '''TimeValue.«value.unit»(«value.time»)'''
         } else {
-            // The default time unit for TypeScript is msec.
-            "new UnitBasedTimeValue(" + value.time + ", TimeUnit.msec)" // FIXME: times should always have units associated with them.
+            // The value must be zero.
+            "TimeValue.zero()"
         }
     }
 
     // //////////////////////////////////////////
     // // Private methods.
-    
-    private def analyzePaths() {
-        // Important files and directories
-        projectPath = directory + File.separator + filename
-        reactorTSPath = File.separator + "lib" + File.separator +
-            "TS" + File.separator + "reactor-ts"
-        srcGenPath = projectPath + File.separator + "src"
-        outPath = projectPath + File.separator + "dist"
-        configPath = File.separator + "lib" + File.separator + "TS"
-        
-        // FIXME: The CGenerator expects these paths to be
-        // relative to the directory, not the project folder
-        // so for now I just left it that way. A different
-        // directory structure for RTI and TS code may be
-        // preferable.
-        cSrcGenPath = directory + File.separator + "src-gen"
-        cOutPath = directory + File.separator + "bin"
-        reactorTSCorePath = reactorTSPath + File.separator + "src" + File.separator
-            + "core" + File.separator
-        tscPath = directory + File.separator + "node_modules" +  File.separator 
-        + "typescript" +  File.separator + "bin" +  File.separator + "tsc"
-    }
     
     /**
      * Generate the part of the preamble that is determined
@@ -1309,74 +1241,41 @@ class TypeScriptGenerator extends GeneratorBase {
      private def generateProtoPreamble() {
         pr("// Imports for protocol buffers")
         // Generate imports for .proto files
-        for (file : config.protoFiles) {
+        for (file : targetConfig.protoFiles) {
             var name = file
             // Remove any extension the file name may have.
             val dot = name.lastIndexOf('.')
             if (dot > 0) {
                 name = name.substring(0, dot)
             }
-            // FIXME: this will break when there are dots in the name.
             var protoImportLine = '''
-                import * as «name» from ".«File.separator»«name»_pb"
+                import * as «name» from "./«name»_pb"
             '''
             pr(protoImportLine)  
         }
         pr("")  
-     }  
+     }
     
-    
-    /** Look for a "logging" target property and return
-     *  the appropriate logging level. This level is a
-     *  subset of Log.level enum from the ulog module
-     *  https://www.npmjs.com/package/ulog. Logged messages
-     *  will display if the level of the message <= the logging level.
-     *  For now, these log levels are:
-     *  Error < Warn < Info < Log < Debug.
-     *  The case of the level when expressed as a target property
-     *  doesn't matter, but the return value from this function is
-     *  in all caps.
-     *  @return The logging target property's value in all caps.
+    /** 
+     * Check whether configuration files are present in the same directory
+     * as the source file. For those that are missing, install a default
+     * If the given filename is not present in the same directory as the source
+     * file, copy a default version of it from /lib/TS/.
      */
-    private def getLoggingLevel() {
-        if (config.logLevel === null) {
-            LogLevel.ERROR.name
-        } else {
-            config.logLevel.name
-        }
-    }
-    
-    /** Copy the designated file from reactor-ts core into the target
-     *  directory.
-     *  @param targetPath The path to where the copied file will be placed.
-     *  @param filename The path to the file from reactor-ts core to copy.
-     */
-    private def copyReactorTSCoreFile(String targetPath, String filename) {
-        copyFileFromClassPath(
-            reactorTSCorePath + filename,
-            targetPath + File.separator + filename
-        )
-    }
-    
-    /** If the given filename doesn't already exist in the targetPath
-     *  create it by copying over the default from /lib/TS/. Do nothing
-     *  if the file already exists because we don't want to overwrite custom
-     *  user-specified configurations. 
-     *  @param targetPath The path to the where the file will be copied.
-     *  @param filename The name of the file for which to create a default in
-     *    the root of the project directory
-     *  @return true if the file was created, false otherwise.
-     */
-    private def createDefaultConfigFile(String targetPath, String filename) {
-        var File defaultFile = new File(targetPath + File.separator + filename)
-        val libFile = configPath + File.separator + filename
-        if(!defaultFile.exists()){
-            println(filename + " does not already exist for this project."
-                + " Copying over default from " + libFile)
-            copyFileFromClassPath(libFile, targetPath + File.separator + filename)
-        } else {
-            println("This project already has " + targetPath + File.separator + filename)
-        }
+    private def initializeProjectConfiguration() {
+        
+        CONFIG_FILES.forEach [ fName |
+            val alt = LIB_PATH + "/" + fName
+            val src = new File(fileConfig.srcPath.toFile, fName)
+            val dst = new File(fileConfig.getSrcGenPkgPath.toFile, fName)
+            if (src.exists) {
+                println("Copying '" + fName + "' from " + fileConfig.srcPath)
+                Files.copy(src.toPath, dst.toPath, StandardCopyOption.REPLACE_EXISTING);
+            } else {
+                println("No '" + fName + "' exists in " + fileConfig.srcPath + ". Using default configuration.")
+                copyFileFromClassPath(alt, dst.absolutePath)
+            }
+        ]
     }
 
 
@@ -1403,7 +1302,7 @@ class TypeScriptGenerator extends GeneratorBase {
         if (action.type !== null) {
             return action.type.targetType
         } else {
-            return "Present"    
+            return "Present"
         }
     }
     
@@ -1418,7 +1317,7 @@ class TypeScriptGenerator extends GeneratorBase {
         if (port.type !== null) {
             return port.type.targetType
         } else {
-            return "Present"    
+            return "Present"
         }
     }
 
@@ -1459,29 +1358,17 @@ class TypeScriptGenerator extends GeneratorBase {
     }
     
     private def getTimeoutTimeValue() {
-        if (config.timeout !== null) {
-            return timeInTargetLanguage(config.timeout)
+        if (targetConfig.timeout !== null) {
+            return timeInTargetLanguage(targetConfig.timeout)
         } else {
             return "undefined"
         }
     }
 
-    static val reactorLibPath = "." + File.separator + "reactor"
-    static val federationLibPath = "." + File.separator + "federation"
-    static val timeLibPath =  "." + File.separator + "time"
-    static val utilLibPath =  "." + File.separator + "util"
-    static val cliLibPath =  "." + File.separator + "cli"
-    static val preamble = 
-'''import commandLineArgs from 'command-line-args'
-import commandLineUsage from 'command-line-usage'
-import {Args, Present, Parameter, State, Variable, Priority, Mutation, Read, Triggers, ReadWrite, Write, Named, Reaction, Action, Startup, Schedule, Timer, Reactor, Port, OutPort, InPort, App} from '«reactorLibPath»'
-import {FederatedApp} from '«federationLibPath»'
-import {TimeUnit, TimeValue, UnitBasedTimeValue, Tag, Origin} from '«timeLibPath»'
-import {Log} from '«utilLibPath»'
-import {ProcessedCommandLineArgs, CommandLineOptionDefs, CommandLineUsageDefs, CommandLineOptionSpec, unitBasedTimeValueCLAType, booleanCLAType} from '«cliLibPath»'
+    override setFileConfig(Resource resource, IFileSystemAccess2 fsa, IGeneratorContext context) {
+        this.fileConfig = new TypeScriptFileConfig(resource, fsa, context)
+    }
 
-'''
-        
     override String getTargetTimeType() {
         "TimeValue"
     }

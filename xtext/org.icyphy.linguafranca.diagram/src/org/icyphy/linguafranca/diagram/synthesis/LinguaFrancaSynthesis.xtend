@@ -68,10 +68,14 @@ import org.icyphy.linguafranca.diagram.synthesis.action.ShowCycleAction
 import org.icyphy.linguafranca.diagram.synthesis.styles.LinguaFrancaShapeExtensions
 import org.icyphy.linguafranca.diagram.synthesis.styles.LinguaFrancaStyleExtensions
 import org.icyphy.linguafranca.diagram.synthesis.styles.ReactorFigureComponents
+import org.icyphy.linguafranca.diagram.synthesis.util.CycleVisualization
+import org.icyphy.linguafranca.diagram.synthesis.util.InterfaceDependenciesVisualization
+import org.icyphy.linguafranca.diagram.synthesis.util.UtilityExtensions
 
 import static extension org.eclipse.emf.ecore.util.EcoreUtil.*
 import static extension org.icyphy.ASTUtils.*
 import static extension org.icyphy.linguafranca.diagram.synthesis.action.MemorizingExpandCollapseAction.*
+import org.icyphy.FileConfig
 
 /**
  * Diagram synthesis for Lingua Franca programs.
@@ -90,9 +94,9 @@ class LinguaFrancaSynthesis extends AbstractDiagramSynthesis<Model> {
 	@Inject extension KPolylineExtensions
 	@Inject extension LinguaFrancaStyleExtensions
 	@Inject extension LinguaFrancaShapeExtensions
-	@Inject extension LinguaFrancaSynthesisUtilityExtensions
-	@Inject extension LinguaFrancaSynthesisCycleDetection
-    @Inject extension LinguaFrancaSynthesisInterfaceDependencies
+	@Inject extension UtilityExtensions
+	@Inject extension CycleVisualization
+    @Inject extension InterfaceDependenciesVisualization
 	@Inject extension FilterCycleAction
 	
 	// -------------------------------------------------------------------------
@@ -794,21 +798,33 @@ class LinguaFrancaSynthesis extends AbstractDiagramSynthesis<Model> {
 		return nodes
 	}
 	
-	private def String createReactorLabel(Reactor reactor, Instantiation instance) {
-		val b = new StringBuilder
-		if (SHOW_INSTANCE_NAMES.booleanValue && instance !== null) {
-			b.append(instance.name).append(" : ")
-		}
-		b.append(reactor === null ? "<NULL>" : reactor.name?:"<Unresolved Reactor>")
-		if (REACTOR_PARAMETER_MODE.objectValue === ReactorParameterDisplayModes.TITLE && reactor !== null) {
-			if (reactor.parameters.empty) {
-				b.append("()")
-			} else {
-				b.append(reactor.parameters.join("(", ", ", ")")[createParameterLabel(false)])
-			}
-		}
-		return b.toString()
-	}
+	private def String createReactorLabel(Reactor reactor,
+        Instantiation instance) {
+        val b = new StringBuilder
+        if (SHOW_INSTANCE_NAMES.booleanValue && instance !== null) {
+            if (!reactor.isMain && !reactor.isFederated) {
+                b.append(instance.name).append(" : ")
+            }
+        }
+        if (reactor.isMain || reactor.isFederated) {
+            b.append(FileConfig.nameWithoutExtension(reactor.eResource))
+        } else {
+            b.append(
+                reactor === null ? "<NULL>" : reactor.name ?:
+                    "<Unresolved Reactor>")
+        }
+        if (REACTOR_PARAMETER_MODE.objectValue ===
+            ReactorParameterDisplayModes.TITLE && reactor !== null) {
+            if (reactor.parameters.empty) {
+                b.append("()")
+            } else {
+                b.append(reactor.parameters.join("(", ", ", ")") [
+                    createParameterLabel(false)
+                ])
+            }
+        }
+        return b.toString()
+    }
 	
 	private def addParameterList(KContainerRendering container, List<Parameter> parameters) {
 		var cols = 1

@@ -55,6 +55,7 @@ import org.icyphy.linguaFranca.ImportedReactor
 import org.icyphy.linguaFranca.Input
 import org.icyphy.linguaFranca.Instantiation
 import org.icyphy.linguaFranca.LinguaFrancaFactory
+import org.icyphy.linguaFranca.LinguaFrancaPackage
 import org.icyphy.linguaFranca.Output
 import org.icyphy.linguaFranca.Parameter
 import org.icyphy.linguaFranca.Port
@@ -70,6 +71,7 @@ import org.icyphy.linguaFranca.TypeParm
 import org.icyphy.linguaFranca.Value
 import org.icyphy.linguaFranca.VarRef
 import org.icyphy.linguaFranca.WidthSpec
+import org.icyphy.linguaFranca.Model
 
 /**
  * A helper class for modifying and analyzing the AST.
@@ -83,6 +85,24 @@ class ASTUtils {
      * The Lingua Franca factory for creating new AST nodes.
      */
     public static val factory = LinguaFrancaFactory.eINSTANCE
+    
+    /**
+     * Make a Timer with name "startup" and default parameters.
+     */
+    static def makeStartupTimer() {
+        val startupTimer = factory.createTimer();
+        startupTimer.name = LinguaFrancaPackage.Literals.TRIGGER_REF__STARTUP.name;
+        return startupTimer;
+    }
+    
+    /**
+     * Make an Action with name "shutdown" and default parameters.
+     */
+    static def makeShutdownAction() {
+        val shutdownAction = factory.createAction();
+        shutdownAction.name = LinguaFrancaPackage.Literals.TRIGGER_REF__SHUTDOWN.name;
+        return shutdownAction;
+    }
     
     /**
      * Find connections in the given resource that have a delay associated with them, 
@@ -147,6 +167,21 @@ class ASTUtils {
                 reactor.instantiations.add(instantiation)
             ]
         ]
+    }
+    
+    /**
+     * Find the main reactor and change it to a federated reactor.
+     * Return true if the transformation was successful (or the given resource
+     * already had a federated reactor); return false otherwise.
+     */
+    static def boolean makeFederated(Resource resource) {
+        val r = resource.allContents.filter(Reactor).findFirst[it.isMain]
+        if (r === null) {
+            return false
+        }
+        r.main = false
+        r.federated = true
+        return true
     }
     
     /**
@@ -1814,7 +1849,13 @@ class ASTUtils {
         return defn?.typeParms.length != 0;
     }
     
-    
+    /**
+     * If the specified reactor declaration is an import, then
+     * return the imported reactor class definition. Otherwise,
+     * just return the argument.
+     * @param r A Reactor or an ImportedReactor.
+     * @return The Reactor class definition.
+     */
     def static Reactor toDefinition(ReactorDecl r) {
         if (r === null)
             return null
@@ -1824,6 +1865,7 @@ class ASTUtils {
             return r.reactorClass
         }
     }
+    
     /**
      * Retrieve a specific annotation in a JavaDoc style comment associated with the given model element in the AST.
      * 
@@ -1899,4 +1941,16 @@ class ASTUtils {
     def static String label(Reaction n) {
         return n.findAnnotationInComments("@label")
     }
+    
+    /**
+     * Find the main reactor and set its name if none was defined.
+     * @param resource The resource to find the main reactor in.
+     */
+    def static setMainName(Resource resource, String name) {
+        val main = resource.allContents.filter(Reactor).findFirst[it.isMain || it.isFederated]
+        if (main !== null && main.name.isNullOrEmpty) {
+            main.name = name
+        }
+    }
+    
 }

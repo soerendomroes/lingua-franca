@@ -1,0 +1,21 @@
+target TypeScript{
+    timeout : 3 sec
+};
+
+import Count from "lib/Count.lf";
+reactor Test {
+    input c:number;
+    state i:number(0);
+    reaction(c) {=
+        console.log("Received " + c);
+        i++;
+        if (c != i) {
+            util.requestErrorStop("ERROR: Expected " + i + " but got " + c);
+        }
+    =}
+}
+main reactor CountTest {
+    count = new Count();
+    test = new Test();
+    count.c -> test.c;
+}
