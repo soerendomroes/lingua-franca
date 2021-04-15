@@ -1,0 +1,444 @@
+
+target C {
+    keepalive: true,
+    no-compile: true,
+    timeout: 80 secs,
+    tracing: {trace-file-name: "deterministic_client"}
+};
+
+preamble {=
+    #include <functional>
+    #include <memory>
+    #include <string>
+    #include <iostream>
+
+    #include "rclcpp/rclcpp.hpp"
+    #include "rclcpp/subscription_options.hpp"
+    #include "std_msgs/msg/int64.hpp"
+    #include "planner_interfaces/msg/rsu_info.hpp"
+    #include "planner_interfaces/msg/notification.hpp"
+    #include "planner_interfaces/msg/stop_sign.hpp" //check if we are out of stop sign to mark completion of physical action
+    #include "planner_interfaces/msg/rsu_client_info.hpp" //TODO: this client sends out to behavioral planner when its okay to go at intersection
+
+    #include "planner_interfaces/msg/vehicle_state_stamped.hpp"
+    #include "planner_interfaces/msg/stop_sign_array.hpp"
+    #include "planner_interfaces/msg/rsu_zone_exit_info.hpp"
+    #include "message_filters/subscriber.h"
+    #include "rclcpp/serialization.hpp"
+    #include "statistics_msgs/msg/metrics_message.hpp"
+
+    #define QUEUE_DEPTH 1
+    #define BILLION 1000000000LL
+
+    auto rsu_client_info_message = planner_interfaces::msg::RsuClientInfo();
+    int this_car_id = 0;
+    pthread_t rclpp_spin_thread;
+    pthread_mutex_t _logical_time_mutex;
+    int collision_msg_counter = 0; //Pesudo indicative of intensity of collision (TODO)
+=}
+
+reactor PlannerPublisher  {
+    preamble {=
+        class PlannerPublisher : public rclcpp::Node {
+            public:
+                PlannerPublisher()
+                : Node("planner_publisher")
+                {
+                    planner_publisher_ = this->create_publisher<planner_interfaces::msg::RsuClientInfo>("rsu_client_info", QUEUE_DEPTH);
+                }
+
+                rclcpp::Publisher<planner_interfaces::msg::RsuClientInfo>::SharedPtr planner_publisher_;
+        };        
+    =}
+    state planner_publisher:{=std::shared_ptr<PlannerPublisher>=};
+    state i:int(0);
+    timer t(0, 5000 msec);
+    //input crossing_allowed:{=planner_interfaces::msg::RsuInfo::SharedPtr=};
+    input crossing_allowed:int;
+
+    reaction(startup) {=
+        // std::cout << "Executing startup." << std::endl;
+        char *argv[] = {(char*)"planner_publisher", NULL};
+        //rclcpp::init(1, argv);
+        self->planner_publisher = std::make_shared<PlannerPublisher>();
+        RCLCPP_INFO(self->planner_publisher->get_logger(), "Lingua Franca reactor initiated");
+
+        if (!register_user_trace_event("publish_go_to_planner")) {
+            fprintf(stderr, "ERROR: Failed to register trace event - publish_go_to_planner.\n");
+            exit(1);
+        }
+
+    =}
+    reaction(crossing_allowed) {=        
+
+        //TODO: COPY_PASTED BELOW FROM DistributedLoopedActionDecentralized.lf
+        tag_t current_tag = get_current_tag();
+        printf("At tag (%lld, %u) received value %d.\n",
+            current_tag.time - get_start_time(),
+            current_tag.microstep,
+            crossing_allowed->value
+        );
+
+        //auto message = planner_interfaces::msg::RsuClientInfo();
+        //rclcpp::Time time_now = self->planner_publisher.get_clock();
+
+        //message.id = get_logical_time() + MSEC(25); // Add a 25 msec delay
+        //rsu_client_info_message.data = get_logical_time() + MSEC(25);
+
+        //RCLCPP_INFO(self->planner_publisher->get_logger(),
+        //            "Sender publishing: '%lld'", rsu_client_info_message.data);
+        self->planner_publisher->planner_publisher_->publish(rsu_client_info_message);
+        //tracepoint_user_value("publish_go_to_planner", get_physical_time());
+
+        //rclcpp::spin_some(self->planner_publisher);
+    =}
+    
+    reaction(shutdown) {=
+        std::cout << "Executing shutdown reaction." << std::endl;
+    	rclcpp::shutdown();
+    =}
+}
+
+reactor RsuClient (STP:time(300 msec)){
+    preamble {=
+        class RsuClient : public rclcpp::Node {
+            public:
+                RsuClient(void* physical_action)
+                : Node("lf_subscriber"), physical_action_(physical_action) {
+
+                    // Create subscription if determinism is enabled (Revised to create anyway)
+                    tracepoint_user_value("determinism_enabled", atoi(deterministic_runtime_str));
+                    //if(deterministic_runtime_str && (atoi(deterministic_runtime_str) == 1) ){
+                        rsu_subscription_ = this->create_subscription<planner_interfaces::msg::RsuInfo>(
+                        "rsu_info", QUEUE_DEPTH, std::bind(&RsuClient::rsu_info_cb, this, std::placeholders::_1));
+                    //}    
+                }
+
+            private:
+                void rsu_info_cb(const planner_interfaces::msg::RsuInfo::SharedPtr msg) const {
+                    tracepoint_user_value("go_from_rsu_rcvd_ts", get_physical_time());
+
+                    //auto header_timestamp = message_filters::message_traits::TimeStamp<T>::value(*msg);
+                    //rclcpp::Time msgTS = (msg->stamp).nanoseconds();
+
+                    instant_t msgTS= (msg->stamp).sec * BILLION + (msg->stamp).nanosec;
+                    //RCLCPP_INFO(this->get_logger(), "(ID '%d' Moving '%d' 'Ready To Go '%d' TS '%ld'.'%ld')", 
+                    //    msg->id, msg->moving, msg->ready_to_go, (msg->stamp).sec, (msg->stamp).nanosec);
+
+                    //Elapsed time (TODO)
+                    //ros::Time elapsed_time = ros::Time::now() - msg->header.stamp;
+                    
+                    //Populate the rsu_info message as it is
+                    rsu_client_info_message.rsu_info.id = msg->id;
+                    rsu_client_info_message.rsu_info.header.stamp = msg->header.stamp;
+                    rsu_client_info_message.rsu_info.stamp = msg->stamp; //TODO: Get rid of this redundant message field
+                    rsu_client_info_message.rsu_info.ready_to_go = msg->ready_to_go;
+                    rsu_client_info_message.rsu_info.moving = msg->moving;
+
+                    tracepoint_user_value("go_from_rsu_sent_ts", msgTS);
+
+                    // Just send the timestamp with schedule for quick tests
+                    if(msg->id == this_car_id)
+                        schedule_copy(physical_action_, 0, &(msgTS), sizeof(instant_t));
+                }
+                rclcpp::Subscription<planner_interfaces::msg::RsuInfo>::SharedPtr rsu_subscription_;
+            	void* physical_action_;
+                char* deterministic_runtime_str = getenv("DETERMINISTIC_RUNTIME");
+        };
+    =}
+    physical action ros_message_a:instant_t;
+    logical action ros_message_l:interval_t;
+    state minimal_subscriber:{=std::shared_ptr<RsuClient>=};
+    //output crossing_allowed:{=planner_interfaces::msg::RsuInfo::SharedPtr=};
+    output crossing_allowed:int;
+    
+    // To keep track of message trail
+    state received_messages:int(0);
+    state dropped_messages:int(0);
+
+    reaction(startup) ->  ros_message_a {=
+        // std::cout << "Executing startup." << std::endl;
+        char *argv[] = {(char*)"lf_subscriber", NULL};
+        rclcpp::init(1, argv);
+        //pthread_create(&rclpp_spin_thread, NULL, rclcpp::spin, &self->minimal_subscriber);
+        
+        if (!register_user_trace_event("go_from_rsu_rcvd_ts")) {
+            fprintf(stderr, "ERROR: Failed to register trace event - go_from_rsu_rcvd_ts.\n");
+            exit(1);
+        }
+
+        if (!register_user_trace_event("rsu_msg_latency")) {
+            fprintf(stderr, "ERROR: Failed to register trace event - rsu_msg_latency.\n");
+            exit(1);
+        }
+
+        if (!register_user_trace_event("go_from_rsu_sent_ts")) {
+            fprintf(stderr, "ERROR: Failed to register trace event - go_from_rsu_sent_ts.\n");
+            exit(1);
+        }
+
+        if (!register_user_trace_event("revised_lf_time")) {
+            fprintf(stderr, "ERROR: Failed to register trace event - revised_lf_time.\n");
+            exit(1);
+        }
+
+        if (!register_user_trace_event("lf_time_correction")) {
+            fprintf(stderr, "ERROR: Failed to register trace event - lf_time_correction.\n");
+            exit(1);
+        }
+
+        if (!register_user_trace_event("deadline_missed")) {
+            fprintf(stderr, "ERROR: Failed to register trace event - deadline_missed.\n");
+            exit(1);
+        }
+
+        if (!register_user_trace_event("collision")) {
+            fprintf(stderr, "ERROR: Failed to register trace event - collision.\n");
+            exit(1);
+        }
+        
+        if (!register_user_trace_event("determinism_enabled")) {
+            fprintf(stderr, "ERROR: Failed to register trace event - determinism_enabled.\n");
+            exit(1);
+        }
+
+        if (!register_user_trace_event("scheduled_delay")) {
+            fprintf(stderr, "ERROR: Failed to register trace event - scheduled_delay.\n");
+            exit(1);
+        }
+
+        self->minimal_subscriber = std::make_shared<RsuClient>(ros_message_a);
+    =}
+    
+    reaction(ros_message_a) -> ros_message_l {=        
+
+        self->received_messages++;
+
+        // Mutex lock to prevent logical time from advancing
+        pthread_mutex_lock(&_logical_time_mutex);
+
+        //Get received timestamp 
+        instant_t cur_logical_time = get_logical_time(); //temp use only
+        instant_t cur_phy_time = get_physical_time();
+        instant_t ros_time = rclcpp::Clock(RCL_ROS_TIME).now().nanoseconds();
+
+        interval_t l_delay = cur_logical_time - ros_message_a->value; 
+        interval_t p_delay = cur_phy_time - ros_message_a->value; //Latency
+
+        tracepoint_user_value("rsu_msg_latency", p_delay);
+    
+        //self->minimal_subscriber->now()
+        RCLCPP_INFO(self->minimal_subscriber->get_logger(), "Received %lld at ros clock time %lld l_delay: %lld", ros_message_a->value, ros_time, l_delay);
+        RCLCPP_INFO(self->minimal_subscriber->get_logger(), "Current phy time: %lld p_delay: %lld", cur_phy_time, p_delay);
+
+        //TODO: Check if l_delay is never negative when this condition is true
+        if ((p_delay <= self->STP) && (l_delay >=0)) {
+           schedule_copy(ros_message_l, l_delay, &(l_delay), sizeof(interval_t));
+           tracepoint_user_value("scheduled_delay", l_delay);
+        } else
+        {
+            //fault
+            RCLCPP_INFO(self->minimal_subscriber->get_logger(), "Message not arrived in time due to p_delay: %lld or l_delay: %lld", p_delay, l_delay);
+            interval_t d = p_delay - self->STP;
+            tracepoint_user_value("deadline_missed", d);   
+        } 
+
+        // Release mutex lock
+        pthread_mutex_unlock(&_logical_time_mutex);
+
+        //TODO: Check if the change was applied - 
+        // Wait for 3 secs for car to exit intersection
+        //interval_t cross_time = SEC(3);
+        //instant_t start_time = get_physical_time();
+        //while (get_physical_time() < start_time + cross_time) {};
+
+    =}deadline(3500 msec) {= //This may never be triggered unless the parametrized time specified is longer than time spent in this reaction
+        interval_t d = get_elapsed_physical_time() - get_elapsed_logical_time();
+        RCLCPP_INFO(self->minimal_subscriber->get_logger(), "*** Deadline missed! Lag: %lld (too late by %lld nsecs)", 
+        		d, d-350000);
+
+        //tracepoint_user_value("deadline_missed", d);        
+    =}
+    
+    reaction(ros_message_l) -> crossing_allowed {=
+
+        // Use current logical time for setting off the planner
+        //******** CHECK IF THIS should be physical time
+        rsu_client_info_message.data = get_logical_time();
+
+        tracepoint_user_value("lf_time_correction", ros_message_l->value);
+
+        // Update RSU's original message to use this new logical timestamp
+        rsu_client_info_message.header.stamp = rclcpp::Clock(RCL_ROS_TIME).now(); // Used just for time template
+        rsu_client_info_message.header.stamp.sec = rsu_client_info_message.data / BILLION;
+        rsu_client_info_message.header.stamp.nanosec = rsu_client_info_message.data % BILLION;
+
+        //tracepoint_user_value("revised_lf_time", rsu_client_info_message.data);
+        SET(crossing_allowed, 1);
+   
+        printf("Elapsed phy time: %lld ns log time: %lld ns msgs_recvd: %d\n" , get_elapsed_physical_time(), get_elapsed_logical_time(),  self->received_messages );
+    =}
+
+    
+    timer t(0, 500 msec);
+    reaction(t) {=
+        rclcpp::spin_some(self->minimal_subscriber);
+        // std::cout << "Timer triggered." << std::endl;
+    =}
+    
+    reaction(shutdown) {=
+        // std::cout << "Executing shutdown reaction." << std::endl;
+
+        //void* rclpp_spin_thread_exit_status;
+        //pthread_join(rclpp_spin_thread, &rclpp_spin_thread_exit_status);
+    	
+        rclcpp::shutdown();
+    =}
+}
+
+reactor CommonSubscriber {
+    preamble {=
+        class CommonSubscriber : public rclcpp::Node {
+            public:
+                CommonSubscriber(void* vehicle_state_pa, void* stop_signs_pa, void* rsu_zone_exit_info_pa)
+                : Node("common_subscriber"), vehicle_state_pa_(vehicle_state_pa), stop_signs_pa_(stop_signs_pa), rsu_zone_exit_info_pa_(rsu_zone_exit_info_pa) {            
+
+                    vehicle_state_subscription_ = this->create_subscription<planner_interfaces::msg::VehicleStateStamped>(
+                        "vehicle_state", QUEUE_DEPTH, std::bind(&CommonSubscriber::vehicle_state_cb, this, std::placeholders::_1));
+
+                    //stop_signs_subscription_ = this->create_subscription<planner_interfaces::msg::StopSignArray>(
+                    //    "stop_signs", QUEUE_DEPTH, std::bind(&CommonSubscriber::stop_signs_cb, this, std::placeholders::_1));
+
+                    rsu_zone_exit_info_subscription_ = this->create_subscription<planner_interfaces::msg::RsuZoneExitInfo>(
+                        "rsu_zone_exit_info", QUEUE_DEPTH, std::bind(&CommonSubscriber::rsu_zone_exit_info_cb, this, std::placeholders::_1));    
+                }
+
+            private:
+                void vehicle_state_cb(const planner_interfaces::msg::VehicleStateStamped::SharedPtr msg) const {
+                    instant_t receivedTS= msg->header.stamp.sec * BILLION + msg->header.stamp.nanosec;
+                    this_car_id = msg->state.id;
+
+                    if(msg->in_collision){
+                        collision_msg_counter++;
+                        tracepoint_user_value("collision", collision_msg_counter);
+                    } else {
+                       if(collision_msg_counter)
+                            collision_msg_counter = 0;
+                    }
+
+                    schedule_copy(vehicle_state_pa_, 0, &(receivedTS), sizeof(instant_t));
+                }
+
+                void stop_signs_cb(const planner_interfaces::msg::StopSignArray::SharedPtr msg) const {
+                    //contains aray of (<int64> id, <Line> fence)
+
+                    //int id = msg->stop_signs[0].id;
+                    schedule_copy(stop_signs_pa_, 0, &(msg->stop_signs[0].id), sizeof(int));
+                }
+
+                void rsu_zone_exit_info_cb(const planner_interfaces::msg::RsuZoneExitInfo::SharedPtr msg) const {
+
+                    if(msg->exited){
+                        interval_t wait_time = (interval_t) msg->wait_time;
+                        //RCLCPP_INFO(this->get_logger(), "RSU Exit info - car id: %lld stop_id: %lld wait_time: %lf Exited: %d", msg->car_id, msg->stop_id, msg->wait_time, msg->exited);
+                        
+                        //TODO: Fix buggy phy action handler below
+                        //schedule_copy(rsu_zone_exit_info_pa_, 0, &(wait_time), sizeof(interval_t));
+                        //wait_time = 0.0;
+                        if(msg->car_id == this_car_id){
+                            tracepoint_user_value("intersection_wait_time", wait_time);
+                        }
+                    }
+                }
+                
+                rclcpp::Subscription<planner_interfaces::msg::VehicleStateStamped>::SharedPtr vehicle_state_subscription_;
+                rclcpp::Subscription<planner_interfaces::msg::StopSignArray>::SharedPtr stop_signs_subscription_;
+                rclcpp::Subscription<planner_interfaces::msg::RsuZoneExitInfo>::SharedPtr rsu_zone_exit_info_subscription_;
+
+            	void* vehicle_state_pa_;
+                void* stop_signs_pa_;
+                void* rsu_zone_exit_info_pa_;
+        };
+    =}
+
+    state common_subscriber:{=std::shared_ptr<CommonSubscriber>=};
+
+    // Messages subscribing to
+    physical action vehicle_message_a:instant_t;
+    physical action stop_signs_message_a:instant_t;
+    physical action rsu_zone_exit_info_a:interval_t;
+
+    state car_id:int;
+    state prev_vehicle_message_ts:{=instant_t=};
+    state prev_stop_signs_message_ts:{=instant_t=};
+    
+    reaction(startup) ->  vehicle_message_a, stop_signs_message_a, rsu_zone_exit_info_a {=
+        self->common_subscriber = std::make_shared<CommonSubscriber>(vehicle_message_a, stop_signs_message_a, rsu_zone_exit_info_a);
+
+        self->prev_vehicle_message_ts = get_physical_time();
+        self->prev_stop_signs_message_ts = get_physical_time();
+
+        if (!register_user_trace_event("intersection_wait_time")) {
+            fprintf(stderr, "ERROR: Failed to register trace event - intersection_wait_time.\n");
+            exit(1);
+        }
+
+        if (!register_user_trace_event("vehicle_state_msg_latency")) {
+            fprintf(stderr, "ERROR: Failed to register trace event - vehicle_state_msg_latency.\n");
+            exit(1);
+        }
+    =}
+
+    reaction(vehicle_message_a){=
+        interval_t  inter_message_delay = vehicle_message_a->value - self->prev_vehicle_message_ts; 
+        interval_t  _latency = get_physical_time() - vehicle_message_a->value; 
+        tracepoint_user_value("vehicle_state_msg_latency", _latency);
+        if(_latency > 5 * BILLION){
+            RCLCPP_INFO(self->common_subscriber->get_logger(), "vehicle_state intermessage Delay: %lld Latency: %lld", inter_message_delay, _latency);
+        }
+        self->prev_vehicle_message_ts = vehicle_message_a->value;
+    =}deadline(500 msec) {=
+        //instant_t d = get_elapsed_physical_time() - get_elapsed_logical_time();
+        RCLCPP_INFO(self->common_subscriber->get_logger(), "*** Deadline missed!");
+    =}
+
+    reaction(rsu_zone_exit_info_a){=
+        interval_t wait_time = rsu_zone_exit_info_a->value; 
+        instant_t  received_time = get_physical_time(); 
+        RCLCPP_INFO(self->common_subscriber->get_logger(), "Wait time at intersection: %lf", wait_time);
+    =}deadline(500 msec) {=
+        //instant_t d = get_elapsed_physical_time() - get_elapsed_logical_time();
+        //RCLCPP_INFO(self->common_subscriber->get_logger(), "*** Deadline missed!");
+    =}    
+
+    reaction(stop_signs_message_a){=
+       
+        //TODO:  Track average time spent at a stop sign
+        //RCLCPP_INFO(self->common_subscriber->get_logger(), "STOP id %d", stop_signs_message_a->value);
+
+        interval_t  inter_message_delay = get_physical_time() - self->prev_stop_signs_message_ts; //No sender's timestamp is included in this msg
+        interval_t  latency = get_physical_time()- stop_signs_message_a->value; 
+        if(latency > 2 * BILLION){
+            //RCLCPP_INFO(self->common_subscriber->get_logger(), "Intermessage Delay: %lld Latency: %lld", inter_message_delay, latency);
+        }
+        self->prev_stop_signs_message_ts = stop_signs_message_a->value;
+    =}deadline(5000 msec) {=
+        RCLCPP_INFO(self->common_subscriber->get_logger(), "*** Longer wait at intersection !");
+    =}
+
+    timer t(0, 500 msec);
+    reaction(t) {=
+        rclcpp::spin_some(self->common_subscriber);
+    =}
+    
+    //reaction(shutdown) {=
+    //	rclcpp::shutdown();
+    //=}
+}
+ 
+main reactor deterministic_client {
+    rsu_client = new RsuClient();
+    planner_publisher = new PlannerPublisher();
+    rsu_client.crossing_allowed -> planner_publisher.crossing_allowed;
+    common_subscriber = new CommonSubscriber();
+}
