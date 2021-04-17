@@ -10,7 +10,7 @@ dependencies {
 }
 
 jacoco {
-    toolVersion = "0.8.7"
+    toolVersion = "0.8.7-SNAPSHOT"
 	reportsDir = file("$buildDir/reports/jacoco") //default directory where jacoco generates test reports
 }
 
