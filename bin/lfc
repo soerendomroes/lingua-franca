@@ -51,8 +51,8 @@ if [[ "$_java" ]]; then
     java_version=$(echo "$semantic_version" | awk -F. '{printf("%03d%03d",$1,$2);}')
     #echo version "$semantic_version"
     #echo version "$java_version"
-    if [ $java_version -lt 011000 ]; then
-        fatal_error "JRE $semantic_version found but 1.11 or greater is required."     
+    if [ $java_version -lt 015000 ]; then
+        fatal_error "JRE $semantic_version found but 1.15 or greater is required."     
         error_exit
     fi
 fi

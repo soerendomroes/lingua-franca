@@ -35,8 +35,8 @@ subprojects {
 	group = 'org.lflang'
 	version = '1.0.0-SNAPSHOT'
 	
-	sourceCompatibility = JavaVersion.VERSION_11
-	targetCompatibility = JavaVersion.VERSION_11
+	sourceCompatibility = JavaVersion.VERSION_15
+	targetCompatibility = JavaVersion.VERSION_15
 
 	configurations.all {
 		exclude group: 'asm'

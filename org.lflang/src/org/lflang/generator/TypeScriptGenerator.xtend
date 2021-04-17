@@ -309,7 +309,14 @@ class TypeScriptGenerator extends GeneratorBase {
     }
     
     override generateDelayBody(Action action, VarRef port) {
-        '''actions.«action.name».schedule(0, «generateVarRef(port)» as «getActionType(action)»);'''
+        //'''actions.«action.name».schedule(0, «generateVarRef(port)» as «getActionType(action)»);'''
+        "actions.%s.schedule(0, %s as %s)".formatted(action.name, generateVarRef(port), getActionType(action))
+// A more verbose version of this, more useful for larger (multi-line) templates
+//        return "actions.$name.schedule(0, $port as $type)"
+//            .replace("$name", action.name)
+//            .replace("$port", generateVarRef(port))
+//            .replace("$type", getActionType(action));
+            
     }
 
     override generateForwardBody(Action action, VarRef port) {
@@ -317,7 +324,7 @@ class TypeScriptGenerator extends GeneratorBase {
     }
  
     override String getTargetReference(Parameter param) {
-        return '''this.«param.name».get()'''
+        return "this.%s.get()".formatted(param.getName())
     }
  
     // //////////////////////////////////////////
