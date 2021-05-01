@@ -25,6 +25,7 @@ THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "lf_baremetal_riscv_support.h"
 #include "../platform.h"
+<<<<<<< HEAD
 #include <time.h> //needed for timespec _lf_time_spec_t
 #include "../tag.h" //needed for BILLION. In flexpret-script under tag.h CLOCK_FREQ is defined, but it's not defined in lf repo
 #include <stdint.h> //needed for the uint32_t 
@@ -76,23 +77,43 @@ struct timespec clock_gettime_helper() {
     ts.tv_nsec = (long) ((uint32_t) (cycle_low * NSEC_PER_CYCLE) % BILLION);
 
     return ts;
+=======
+
+/**
+ * Fetch the value of clk_id and store it in tp.
+ */
+int lf_clock_gettime(_lf_clock_t clk_id, _lf_time_spec_t* tp) {
+    return clock_gettime((clockid_t)clk_id, (struct timespec*) tp);
+>>>>>>> added support.c and support.h files for baremetal
 }
 
 /**
  * Pause execution for a number of nanoseconds.
  */
+<<<<<<< HEAD
 int lf_nanosleep(_lf_time_spec_t *req, _lf_time_spec_t *rem) {
 
     struct timespec start_time = clock_gettime_helper();
     struct timespec ts = start_time;
     while (ts.tv_sec < start_time.tv_sec + req->tv_sec || (ts.tv_sec == start_time.tv_sec + req->tv_sec && ts.tv_nsec <= start_time.tv_nsec + req->tv_nsec)) {
         ts = clock_gettime_helper();
+=======
+int nanosleep(_lf_time_spec_t *req, _lf_time_spec_t *rem) {
+
+    _lf_time_spec_t start_time = __clock_gettime();
+    _lf_time_spec_t ts = start_time;
+    while (ts.tv_sec < start_time.tv_sec + req->tv_sec || (ts.tv_sec == start_time.tv_sec + req->tv_sec && ts.tv_nsec <= start_time.tv_nsec + req->tv_nsec)) {
+        ts = __clock_gettime();
+>>>>>>> added support.c and support.h files for baremetal
     }
 
     return 0;
 }
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> added support.c and support.h files for baremetal
 // Default nosys implementation of _sbrk
 void *
 _sbrk (incr)
