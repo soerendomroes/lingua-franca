@@ -4,6 +4,9 @@ buildscript {
 	}
 	dependencies {
 		classpath 'org.xtext:xtext-gradle-plugin:2.0.8'
+		//classpath 'org.eclipse.platform:org.eclipse.osgi:3.16.200'
+		//classpath 'org.eclipse.platform:org.eclipse.core.runtime:3.20.100'
+		classpath 'org.osgi:org.osgi.framework:1.10.0'
 	}
 }
 
@@ -11,6 +14,19 @@ plugins {
     id "com.github.johnrengelman.shadow" version "6.0.0"
 	id 'java'
 	id 'jacoco'
+	id "com.diffplug.oomph.ide" version "3.29.1"
+}
+
+oomphIde {
+  repoEclipseLatest()
+  jdt {}
+  eclipseIni {
+    vmargs('-Xmx2g')    // IDE can have up to 2 gigs of RAM
+  }
+  style {
+    classicTheme()  // oldschool cool
+    niceText()      // with nice fonts and visible whitespace
+  }
 }
 
 subprojects {
@@ -18,7 +34,6 @@ subprojects {
 	repositories {
 		mavenCentral()
 	}
-	
 	apply plugin: 'java'
 	dependencies {
 		implementation platform("org.eclipse.xtext:xtext-dev-bom:${xtextVersion}")
