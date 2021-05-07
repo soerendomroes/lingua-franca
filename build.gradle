@@ -14,20 +14,21 @@ plugins {
     id "com.github.johnrengelman.shadow" version "6.0.0"
 	id 'java'
 	id 'jacoco'
-	id "com.diffplug.oomph.ide" version "3.29.1"
+	id "com.diffplug.oomph.ide" version "3.29.0"
+	//id "com.diffplug.osgi" version "3.29.1"
 }
 
-oomphIde {
-  repoEclipseLatest()
-  jdt {}
-  eclipseIni {
-    vmargs('-Xmx2g')    // IDE can have up to 2 gigs of RAM
-  }
-  style {
-    classicTheme()  // oldschool cool
-    niceText()      // with nice fonts and visible whitespace
-  }
-}
+// oomphIde {
+//   repoEclipseLatest()
+//   jdt {}
+//   eclipseIni {
+//     vmargs('-Xmx2g')    // IDE can have up to 2 gigs of RAM
+//   }
+//   style {
+//     classicTheme()  // oldschool cool
+//     niceText()      // with nice fonts and visible whitespace
+//   }
+// }
 
 subprojects {
 	ext.xtextVersion = '2.23.0'
