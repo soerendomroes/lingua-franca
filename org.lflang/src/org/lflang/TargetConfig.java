@@ -221,6 +221,15 @@ public class TargetConfig {
      */
     public TracingOptions tracing = null;
 
+    /**
+     * If non-empty sets the target platform that code will be generated for.  
+     * Use flags: "mac", "linux", "windows" to generate code for the respective platforms,
+     * which is different than the OS of the host machine.
+     * Use flag "baremetal_riscv" to cross code generate for baremetal platforms.
+     *  The default is the OS of the system.
+     */
+    public String platform = "";
+
 
     /**
      * If true, the resulting binary will output a graph visualizing all reaction dependencies.

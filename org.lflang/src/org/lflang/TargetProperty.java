@@ -475,6 +475,11 @@ public enum TargetProperty {
 
     ;
 
+    PLATFORM("platform", PrimitiveType.STRING, Arrays.asList(Target.ALL),
+            (config, value) -> {
+                config.platform = ASTUtils.toText(value);
+            });
+    
     /**
      * String representation of this target property.
      */
