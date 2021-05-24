@@ -1,0 +1,135 @@
+/**
+ * An Orwellian model of a smart intersection with a road-side unit (RSU)
+ * that regulates the flow of automated vehicles through the
+ * intersection. Vehicles that are approaching the intersection
+ * send an initial message to the RTU with their speed and
+ * distance to the intersection. The RTU responds with a
+ * reservation for when the vehicle can enter the intersection
+ * and what its average speed through the intersection should be.
+ * 
+ * This is meant as a supervisory controller, and it assumes that
+ * the vehicle is equipped with a low-level controller (or a human)
+ * that is responsible for lane keeping, collision avoidance, etc.
+ * 
+ * This is a very rough starting point that needs a lot of work.
+ */
+target C {
+    threads: 2,
+    build: "./compile.sh NcursesIntersection", 
+    files: ["/lib/C/util/sensor_simulator.c", "/lib/C/util/sensor_simulator.h"],
+    timeout: 10 sec
+}
+
+import Vehicle, RSU from "./Intersection.lf";
+
+reactor NcursesRenderer(
+    num_entries:int(4),
+    message:char**({=instructions=}),
+    message_length:int({=instructions_length=}),
+    log_to_file:bool(false)
+) {
+    
+    input[num_entries] next_vehicle:interval_t;
+    input[num_entries] request:request_message_t;
+    input[num_entries] grant:grant_message_t;
+    
+    preamble {=
+	    #include <ncurses.h>
+	    #include <sys/stat.h> // Defines mkdir.
+	    #include "sensor_simulator.c"
+	    
+	    //////////////////////////////////////
+	    // Configuration of the user interface.
+	
+	    char* instructions[] = {
+	        "Intersection Simulation. Change?",
+	        "------------------------",
+	        "Spawn vehicle from North:",
+	        "	q - left turn",
+	        "	a - go straight",
+	        "	z - right turn",
+	        "Spawn vehicle from South:",
+	        "	w - left turn",
+	        "	s - go straight",
+	        "	x - right turn",
+	        "Spawn vehicle from West:",
+	        "	e - left turn",
+	        "	d - go straight",
+	        "	c - right turn",
+	        "Spawn vehicle from East:",
+	        "	r - left turn",
+	        "	f - go straight",
+	        "	v - right turn",
+	    };
+	    int instructions_length = 18;
+	=}
+	
+	reaction(startup) {=
+        /*
+        // Start the sensor simulator, which starts ncurses.
+        char* log_file_name = NULL;
+        if (self->log_to_file) {
+            log_file_name = calloc(40, sizeof(char));
+        	// FIXME: log directory won't work in Windows (wrong separator).
+        	mkdir("log", 0755);
+        	int fed_id = get_fed_id();
+        	if (fed_id < 0) {
+        		sprintf(log_file_name, "log/Rhythm_%lld.log", get_logical_time());
+      		} else {
+        		sprintf(log_file_name, "log/Rhythm_%d_%lld.log", fed_id, get_logical_time());
+        	}
+        }
+        if (start_sensor_simulator(
+            self->message, self->message_length, 16, log_file_name, LOG_LEVEL_ALL
+        )) {
+            error_print_and_exit("ERROR: Failed to start sensor simulator.");
+        }
+        
+        // Register action to trigger on key press.
+        // register_sensor_key('\0', key);
+        
+        // schedule(tick, self->tick_duration);
+        */
+    =}
+    
+    reaction(next_vehicle) {=
+        // Renders the arrival of the next vehicle
+        for (int i = 0; i < self->num_entries; i++) {
+            if (next_vehicle[i]->is_present) {
+                info_print("ncurses: next vehicle %d approaching in %lld", i, next_vehicle[i]->value);
+            }
+        }
+    =}
+    
+    reaction(request) {=
+        // Renders vehicles sending request
+        for (int i = 0; i < self->num_entries; i++) {
+            if (request[i]->is_present) {
+                info_print("ncurses: vehicle %d sending request (speed: %f, dist; %f)", i, request[i]->value.speed, request[i]->value.distance);
+            }
+        }
+    =}
+    
+    reaction(grant) {=
+        // Renders vehicles receiving grants
+        for (int i = 0; i < self->num_entries; i++) {
+            if (grant[i]->is_present) {
+                info_print("ncurses: vehicle %d receiving grant (target_speed: %f, arrival_time: %lld)", i, grant[i]->value.target_speed, grant[i]->value.arrival_time);
+            }
+        }
+    =}
+}
+
+main reactor {
+    vehicles = new[4] Vehicle(offset=0);
+    rsu = new RSU(num_entries=4);
+    ncurses = new NcursesRenderer(num_entries=4);
+    
+    vehicles.request -> rsu.request;
+    rsu.grant -> vehicles.grant;
+    
+    vehicles.next_vehicle -> ncurses.next_vehicle;
+    vehicles.request_sent -> ncurses.request;
+    rsu.grant -> ncurses.grant;
+    
+}

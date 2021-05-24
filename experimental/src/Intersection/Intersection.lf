@@ -56,6 +56,9 @@ reactor Vehicle (
     
     output request:request_message_t;
     
+    output next_vehicle:interval_t; // Notify Ncurses when the next car arrives.
+    output request_sent:request_message_t; // Notify Ncurses when requests are sent.
+    
     logical action delay;
     
     reaction(startup) -> request, delay {=
@@ -71,12 +74,15 @@ reactor Vehicle (
         }
     =}
 
-    reaction(delay) -> request, delay {=
+    reaction(delay) -> request, delay, request_sent {=
         request_message_t message;
        	message.speed = self->speed;
        	message.distance = self->distance;
        	SET(request, message);
        	schedule(delay, timer_periods[self->bank_index]);
+       	
+       	// Ncurses
+       	SET(request_sent, message);
     =}
     
     reaction(grant) {=
@@ -85,6 +91,12 @@ reactor Vehicle (
             get_elapsed_physical_time()
         );
     =}
+    
+    // Ncurses-related reactions
+    reaction(delay) -> next_vehicle {=
+        info_print("Vehicle: setting next_vehicle to %lld", timer_periods[self->bank_index]);
+        SET(next_vehicle, timer_periods[self->bank_index]);
+    =}    
 }
 
 reactor RSU (
