@@ -400,8 +400,17 @@ class CGenerator extends GeneratorBase {
         } else {
             coreFiles.add("reactor_threaded.c")
         }
+        var OS = ""
         // Check the operating system
-        val OS = System.getProperty("os.name").toLowerCase();
+        if (targetConfig.platform != "") {
+            if (targetConfig.noCompile) {
+                OS = targetConfig.platform
+            } else {
+                reportError("Need no-compile flag to use the platform target property.")
+            }            
+        } else {
+            OS = System.getProperty("os.name").toLowerCase();
+        }       
         // FIXME: allow for cross-compiling
         // Based on the detected operating system, copy the required files
         // to enable platform-specific functionality. See lib/core/platform.h
@@ -440,6 +449,19 @@ class CGenerator extends GeneratorBase {
             if (mainDef !== null) {
                 targetConfig.compileAdditionalSources.add(fileConfig.getSrcGenPath + File.separator + "core/platform/lf_linux_support.c")
             }
+        } else if (OS.indexOf("baremetal_riscv") >= 0) {
+            //Baremetal RISC-V support
+            coreFiles.add("platform/lf_POSIX_threads_support.c")
+            coreFiles.add("platform/lf_C11_threads_support.c")
+            coreFiles.add("platform/lf_POSIX_threads_support.h")
+            coreFiles.add("platform/lf_C11_threads_support.h")
+            coreFiles.add("platform/lf_baremetal_riscv_support.c")
+            coreFiles.add("platform/lf_baremetal_riscv_support.h")
+            // If there is no main reactor, then compilation will produce a .o file requiring further linking.
+            if (mainDef !== null) {
+                targetConfig.compileAdditionalSources.add(fileConfig.getSrcGenPath + File.separator + "core/platform/lf_baremetal_riscv_support.c")
+            }
+            
         } else {
             reportError("Platform " + OS + " is not supported")
         }
