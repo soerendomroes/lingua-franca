@@ -451,10 +451,10 @@ class CGenerator extends GeneratorBase {
             }
         } else if (OS.indexOf("baremetal_riscv") >= 0) {
             //Baremetal RISC-V support
-            coreFiles.add("platform/lf_POSIX_threads_support.c")
-            coreFiles.add("platform/lf_C11_threads_support.c")
-            coreFiles.add("platform/lf_POSIX_threads_support.h")
-            coreFiles.add("platform/lf_C11_threads_support.h")
+            //coreFiles.add("platform/lf_POSIX_threads_support.c")
+            //coreFiles.add("platform/lf_C11_threads_support.c")
+            //coreFiles.add("platform/lf_POSIX_threads_support.h")
+            //coreFiles.add("platform/lf_C11_threads_support.h")
             coreFiles.add("platform/lf_baremetal_riscv_support.c")
             coreFiles.add("platform/lf_baremetal_riscv_support.h")
             // If there is no main reactor, then compilation will produce a .o file requiring further linking.
