@@ -42,12 +42,6 @@ THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //hardcoded because it wasn't defined in tag.h
 #define CLOCK_FREQ 100000000LL
 
-// System call interface for getting the current time.
-int lf_clock_gettime(struct timespec *tp) {
-
-    *tp = __clock_gettime();
-    return 0;
-}
 
 // ********** RISC-V Bare Metal Support
 // Gets the current physical time by cycle counting
@@ -78,6 +72,13 @@ struct timespec __clock_gettime() {
     return ts;
 }
 
+
+// System call interface for getting the current time.
+int lf_clock_gettime(struct timespec *tp) {
+
+    *tp = __clock_gettime();
+    return 0;
+}
 
 /**
  * Pause execution for a number of nanoseconds.
