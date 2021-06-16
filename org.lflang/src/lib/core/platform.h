@@ -49,7 +49,7 @@ THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
     #include "platform/lf_POSIX_threads_support.h"
 #elif defined(__riscv) || defined(__riscv__) 
     // RISC-V (see https://github.com/riscv/riscv-toolchain-conventions)
-    #error "RISC-V not supported"
+    #include "platform/lf_baremetal_riscv_support.h"
 #else
 #error "Platform not supported"
 #endif
@@ -62,7 +62,7 @@ typedef _lf_cond_t lf_cond_t;            // Type to hold handle to a condition v
 typedef _lf_thread_t lf_thread_t;        // Type to hold handle to a thread
 #endif
 
-typedef _lf_time_spec_t lf_time_spec_t;  // Type to hold time in a traditional {second, nanosecond} POSIX format
+typedef struct timespec lf_time_spec_t;  // Type to hold time in a traditional {second, nanosecond} POSIX format
 typedef _lf_clock_t lf_clock_t;          // Type to hold a clock identifier (e.g., CLOCK_REALTIME on POSIX)
 
 #ifdef NUMBER_OF_WORKERS

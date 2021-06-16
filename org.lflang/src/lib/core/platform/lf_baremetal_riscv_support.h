@@ -35,7 +35,8 @@ THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //#endif
 
 typedef struct timespec lf_time_spec_t; //Is timespec struct independent from platform
-//typedef int _lf_clock_t;
+typedef int _lf_clock_t;
+#define _LF_CLOCK 0
 //typedef int clockid_t; //reactor.h
 
 #endif // LF_BAREMETAL_RISCV_SUPPORT_H
