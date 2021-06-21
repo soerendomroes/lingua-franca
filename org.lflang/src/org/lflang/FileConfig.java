@@ -10,6 +10,7 @@ import java.util.Comparator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IProject;
@@ -323,12 +324,69 @@ public class FileConfig {
     }
     
     /**
+     * Create nested directories if the given path string does not exist.
+     */
+    public static void createDirectories(String path) {
+        createDirectories(Paths.get(path));
+    }
+    
+    /**
      * Create nested directories if the given path does not exist.
      */
     public static void createDirectories(Path path) {
         File file = path.toFile();
         if (!file.exists()) {
             file.mkdirs();
+        }
+    }
+    
+    /**
+     * Copy a given directory from 'src' to 'dest'.
+     * 
+     * @param src The source directory path string.
+     * @param dest The destination directory path string.
+     * @throws IOException if copy fails.
+     */
+    public static void copyDirectory(String src, String dest) throws IOException {
+        copyDirectory(Paths.get(src), Paths.get(dest));
+    }
+    
+    /**
+     * Copy a given directory from 'src' to 'dest'.
+     * 
+     * @param src The source directory path.
+     * @param dest The destination directory path.
+     * @throws IOException if copy fails.
+     */
+    public static void copyDirectory(Path src, Path dest) throws IOException {
+        try (Stream<Path> stream = Files.walk(src)) {
+            stream.forEach(source -> copyFile(source, dest.resolve(src.relativize(source))));
+        }
+    }
+
+    /**
+     * Copy a given file from 'src' to 'dest'.
+     * 
+     * @param source The source file path string.
+     * @param dest The destination file path string.
+     * @throws RuntimeException if copy fails.
+     */
+    public static void copyFile(String src, String dest) {
+        copyFile(Paths.get(src), Paths.get(dest));
+    }
+    
+    /**
+     * Copy a given file from 'src' to 'dest'.
+     * 
+     * @param source The source file path.
+     * @param dest The destination file path.
+     * @throws RuntimeException if copy fails.
+     */
+    public static void copyFile(Path src, Path dest) {
+        try {
+            Files.copy(src, dest, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        } catch (Exception e) {
+            throw new RuntimeException(e.getMessage(), e);
         }
     }
 
@@ -348,6 +406,15 @@ public class FileConfig {
         }
     }
 
+    /**
+     * Recursively delete a directory if it exists.
+     * 
+     * @throws IOException
+     */
+    public void deleteDirectory(String dir) throws IOException {
+        deleteDirectory(Paths.get(dir));
+    }
+    
     /**
      * Recursively delete a directory if it exists.
      * 
