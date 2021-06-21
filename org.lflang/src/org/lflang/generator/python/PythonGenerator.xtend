@@ -59,6 +59,7 @@ import org.lflang.lf.VarRef
 import static extension org.lflang.ASTUtils.*
 import java.nio.file.Paths
 import org.lflang.FileConfig
+import org.lflang.TargetProperty.CoordinationType
 
 /** 
  * Generator for Python target. This class generates Python code defining each reactor
@@ -89,36 +90,36 @@ class PythonGenerator extends CGenerator {
     }
     	
     /** 
-    * Template struct for ports with primitive types and
-    * statically allocated arrays in Lingua Franca.
+    * Template struct for ports.
     * This template is defined as
-    *     template <class T>
     *     struct template_input_output_port_struct {
-    *         T value;
+    *         PyObject* value;
     *         bool is_present;
     *         int num_destinations;
+    *         tag_t intended_tag;                 // Only if federated
+    *         instant_t physical_time_of_arrival; // Only if federated
     *     };
     *
-    * @see xtext/org.lflang.linguafranca/src/lib/CCpp/ccpptarget.h
+    * @see xtext/org.lflang.linguafranca/src/lib/Python/pythontarget.h
     */
 	val generic_port_type =  "generic_port_instance_struct"
-
+	
     /** 
-    * Special template struct for ports with dynamically allocated
-    * array types (a.k.a. token types) in Lingua Franca.
+    * Template struct for actions.
     * This template is defined as
-    *     template <class T>
     *     struct template_input_output_port_struct {
-    *         T value;
+    *         trigger_t* trigger;
+    *         PyObject* value;
     *         bool is_present;
-    *         int num_destinations;
+    *         bool has_value;
     *         lf_token_t* token;
-    *         int length;
+    *         tag_t intended_tag;                 // Only if federated
+    *         instant_t physical_time_of_arrival; // Only if federated
     *     };
     *
-    * @see xtext/org.lflang.linguafranca/src/lib/CCpp/ccpptarget.h
+    * @see xtext/org.lflang.linguafranca/src/lib/Python/pythontarget.h
     */
-	val generic_port_type_with_token = "generic_port_instance_with_token_struct"
+	val generic_action_type = "generic_action_instance_struct"
 	
 	override getTargetUndefinedType() '''PyObject*'''
 	
@@ -649,16 +650,18 @@ class PythonGenerator extends CGenerator {
      * If the LF program itself is threaded or if tracing is enabled, NUMBER_OF_WORKERS is added as a macro
      * so that platform-specific C files will contain the appropriate functions.
      */
-    def generatePythonSetupFile(String filename) '''
+    def generatePythonSetupFile(FederateInstance federate) '''
     from setuptools import setup, Extension
     
-    linguafranca«filename»module = Extension("LinguaFranca«filename»",
-                                               sources = ["«filename».c", «FOR src : targetConfig.compileAdditionalSources SEPARATOR ", "» "«src»"«ENDFOR»],
-                                               define_macros=[('MODULE_NAME', 'LinguaFranca«filename»')«IF (targetConfig.threads !== 0 || (targetConfig.tracing !== null))», 
-                                                              ('NUMBER_OF_WORKERS', '«targetConfig.threads»')«ENDIF»])
+    linguafranca«federate.fileNameForFederate»module = Extension("LinguaFranca«federate.fileNameForFederate»",
+       sources = ["«federate.fileNameForFederate».c", \
+           «FOR src : targetConfig.compileAdditionalSources SEPARATOR ", "» "«src»"«ENDFOR»],
+       define_macros=[('MODULE_NAME', 'LinguaFranca«federate.fileNameForFederate»') \
+           «IF (targetConfig.threads !== 0 || (targetConfig.tracing !== null))», 
+           ('NUMBER_OF_WORKERS', '«targetConfig.threads»')«ENDIF»])
     
-    setup(name="LinguaFranca«filename»", version="1.0",
-            ext_modules = [linguafranca«filename»module],
+    setup(name="LinguaFranca«federate.fileNameForFederate»", version="1.0",
+            ext_modules = [linguafranca«federate.fileNameForFederate»module],
             install_requires=['LinguaFrancaBase' «pythonRequiredModules»],)
     '''
     
@@ -667,16 +670,17 @@ class PythonGenerator extends CGenerator {
      * @param fsa The file system access (used to write the result).
      * @param federate The federate instance
      */
-    def generatePythonFiles(IFileSystemAccess2 fsa, FederateInstance federate, String filename) {
-        var file = new File(fileConfig.getSrcGenPath.toFile,  filename + ".py")
+    def generatePythonFiles(IFileSystemAccess2 fsa, FederateInstance federate) {
+        var file = new File(fileConfig.getSrcGenPath.toFile, federate.fileNameForFederate + ".py")
         if (file.exists) {
             file.delete
         }
         // Create the necessary directories
         if (!file.getParentFile().exists())
             file.getParentFile().mkdirs();
-        writeSourceCodeToFile(generatePythonCode(federate, filename).toString.bytes, file.absolutePath)
-        
+        writeSourceCodeToFile(generatePythonCode(federate, federate.fileNameForFederate).toString.bytes,
+            file.absolutePath)
+
         val setupPath = fileConfig.getSrcGenPath.resolve("setup.py")
         // Handle Python setup
         System.out.println("Generating setup file to " + setupPath)
@@ -685,17 +689,16 @@ class PythonGenerator extends CGenerator {
             // Append
             file.delete
         }
-            
+
         // Create the setup file
-        writeSourceCodeToFile(generatePythonSetupFile(filename).toString.bytes, setupPath.toString)
-             
-        
+        writeSourceCodeToFile(generatePythonSetupFile(federate).toString.bytes, setupPath.toString)
+
     }
     
     /**
      * Execute the command that compiles and installs the current Python module
      */
-    def pythonCompileCode() {
+    def pythonCompileCode(FederateInstance federate) {
         val compileCmd = createCommand(
             '''python3''',
             #["setup.py", "build"],
@@ -712,8 +715,12 @@ class PythonGenerator extends CGenerator {
             true
            )
 
-        compileCmd.directory(fileConfig.getSrcGenPath.toFile)
-        installCmd.directory(fileConfig.getSrcGenPath.toFile)
+        var srcGenFile = fileConfig.getSrcGenPath.toFile;
+        if (isFederated) {
+            srcGenFile = new File(fileConfig.getSrcGenPath.toFile, File.separator + federate.name);
+        }
+        compileCmd.directory(srcGenFile)
+        installCmd.directory(srcGenFile)
 
         // Set compile time environment variables
         val compileEnv = compileCmd.environment
@@ -752,14 +759,15 @@ class PythonGenerator extends CGenerator {
         }
     }
     
-    /**
-     * Do nothing. The Python generator handles compiling differently.
+    /** Add necessary header files specific to the target language.
+     *  Note. The core files always need to be (and will be) copied 
+     *  uniformly across all target languages.
      */
-    override runCCompiler(String file, boolean doNotLinkIfNoMain) {
-        // Note that this function is deliberately left empty to prevent the CGenerator from
-        // compiling this code. The Python generator will create a setup.py and compile generated
-        // C code appropriately.
-        return true
+    override includeTargetLanguageHeaders() {        
+        pr('''#define __GARBAGE_COLLECTED''')       
+        pr('#include "pythontarget.c"')
+        
+        super.includeTargetLanguageHeaders();
     }
     
     /** 
@@ -788,6 +796,27 @@ class PythonGenerator extends CGenerator {
                 ''')
             }
         }
+        
+        if (isFederated) {
+            // FIXME: Instead of checking
+            // #ifdef FEDERATED, we could
+            // use #if (NUMBER_OF_FEDERATES > 1)
+            // To me, the former is more accurate.
+            pr('''
+                #define FEDERATED
+            ''')
+            if (targetConfig.coordination === CoordinationType.CENTRALIZED) {
+                // The coordination is centralized.
+                pr('''
+                    #define FEDERATED_CENTRALIZED
+                ''')                
+            } else if (targetConfig.coordination === CoordinationType.DECENTRALIZED) {
+                // The coordination is decentralized
+                pr('''
+                    #define FEDERATED_DECENTRALIZED
+                ''')
+            }
+        }
 
         pr(CGenerator.defineLogLevel(this))
 
@@ -797,8 +826,21 @@ class PythonGenerator extends CGenerator {
 
         // Handle target parameters.
         // First, if there are federates, then ensure that threading is enabled.
-        if (targetConfig.threads === 0 && isFederated) {
-            targetConfig.threads = 1
+        if (targetConfig.coordinationOptions.advance_message_interval !== null) {
+            pr('#define ADVANCE_MESSAGE_INTERVAL ' + targetConfig.coordinationOptions.advance_message_interval.timeInTargetLanguage)
+        }
+                        
+        // Handle target parameters.
+        // First, if there are federates, then ensure that threading is enabled.
+        if (isFederated) {
+            for (federate : federates) {
+                // The number of threads needs to be at least one larger than the input ports
+                // to allow the federate to wait on all input ports while allowing an additional
+                // worker thread to process incoming messages.
+                if (targetConfig.threads < federate.networkMessageActions.size + 1) {
+                    targetConfig.threads = federate.networkMessageActions.size + 1;
+                }            
+            }
         }
 
         super.includeTargetLanguageSourceFiles()
@@ -870,8 +912,8 @@ class PythonGenerator extends CGenerator {
     }
     
     /**
-     * Generate the aliases for inputs, outputs, and struct type definitions for 
-     * actions of the specified reactor in the specified federate.
+     * Generate the aliases for inputs, outputs, and  actions of the specified reactor in the specified federate.
+     * 
      * @param reactor The parsed reactor data structure.
      * @param federate A federate name, or null to unconditionally generate.
      */
@@ -881,46 +923,21 @@ class PythonGenerator extends CGenerator {
         val reactor = decl.toDefinition
         // First, handle inputs.
         for (input : reactor.allInputs) {
-            if (input.inferredType.isTokenType) {
-                pr(input, code, '''
-                    typedef «generic_port_type_with_token» «variableStructType(input, decl)»;
-                ''')
-            }
-            else
-            {
-                pr(input, code, '''
-                   typedef «generic_port_type» «variableStructType(input, decl)»;
-                ''')                
-            }
-            
+            pr(input, code, '''
+               typedef «generic_port_type» «variableStructType(input, decl)»;
+            ''')
         }
         // Next, handle outputs.
         for (output : reactor.allOutputs) {
-            if (output.inferredType.isTokenType) {
-                 pr(output, code, '''
-                    typedef «generic_port_type_with_token» «variableStructType(output, decl)»;
-                 ''')
-            }
-            else
-            {
-                pr(output, code, '''
-                    typedef «generic_port_type» «variableStructType(output, decl)»;
-                ''')
-            }
+            pr(output, code, '''
+                typedef «generic_port_type» «variableStructType(output, decl)»;
+            ''')
         }
+        
         // Finally, handle actions.
-        // The very first item on this struct needs to be
-        // a trigger_t* because the struct will be cast to (trigger_t*)
-        // by the schedule() functions to get to the trigger.
         for (action : reactor.allActions) {
             pr(action, code, '''
-                typedef struct {
-                    trigger_t* trigger;
-                    «action.valueDeclaration»
-                    bool is_present;
-                    bool has_value;
-                    lf_token_t* token;
-                } «variableStructType(action, reactor)»;
+                typedef «generic_action_type» «variableStructType(action, reactor)»;
             ''')
         }
     }
@@ -942,16 +959,6 @@ class PythonGenerator extends CGenerator {
         }
         return "PyObject* value;"
     }
-    
-    /** Add necessary include files specific to the target language.
-     *  Note. The core files always need to be (and will be) copied 
-     *  uniformly across all target languages.
-     */
-    override includeTargetLanguageHeaders() {
-        pr('''#define MODULE_NAME LinguaFranca«fileConfig.name»''')
-        pr('''#define __GARBAGE_COLLECTED''')    	
-        pr('#include "pythontarget.c"')
-    }
 
     /** Generate C code from the Lingua Franca model contained by the
      *  specified resource. This is the main entry point for code
@@ -966,52 +973,71 @@ class PythonGenerator extends CGenerator {
         if(isFederated) {
             targetConfig.threads = 1;
         }
-
+        
+        // Prevent the CGenerator from compiling code.
+        val previousValueOfNoCompile = targetConfig.noCompile;
+        targetConfig.noCompile = true;
+        
+        // Run the CGenerator
         super.doGenerate(resource, fsa, context)
-
+        
+        // Restore the value of the no-compile target property
+        // that is set (or not) by the user
+        targetConfig.noCompile =  previousValueOfNoCompile;
+        
+        pr('''#define MODULE_NAME LinguaFranca«topLevelName»''')
+        pr('''#define __GARBAGE_COLLECTED''')       
+        pr('#include "pythontarget.c"')
+        
+        
         if (generatorErrorsOccurred) return;
 
-        var baseFileName = fileConfig.name
         for (federate : federates) {
-            if (isFederated) {
-                baseFileName = federate.name + '/' + baseFileName + '_' + federate.name
-                FileConfig.createDirectories(Paths.get(fileConfig.getSrcGenPath.toString + federate.name)) 
-            }
             // Don't generate code if there is no main reactor
             if (this.main !== null) {
-                generatePythonFiles(fsa, federate, baseFileName)
-                // The C generator produces all the .c files in a single central folder.
-                // However, we need to create a setup.py for each federate and run
-                // "pip install ." individually to compile and install each module
-                // Here, we move the necessary C files into each federate's folder
+                generatePythonFiles(fsa, federate)
                 if (!federate.isSingleton) {                     
-                    var filesToCopy = newArrayList(
-                        baseFileName + "_" + federate.name + ".c", 
-                        "pythontarget.c", 
-                        "pythontarget.h",
-                        "ctarget.h",
-                        "core")
-                    
-                    copyFilesFromClassPath(
-                        fileConfig.getSrcGenPath.toString, 
-                        fileConfig.getSrcGenPath.toString + federate.name, 
-                        filesToCopy
-                    );
-                    
-                    // Do not compile the Python code here. They will be compiled on remote machines
-                }
-                else {
-                    if (targetConfig.noCompile !== true) {
-                        // If there are no federates, compile and install the generated code
-                        pythonCompileCode
-                    }
+                    copySrcGenFilesForFederate(federate);
+                } 
+                if (targetConfig.noCompile !== true) {
+                    // If there are no federates, compile and install the generated code
+                    pythonCompileCode(federate);
                 }
             }
 
         }
+        if (!targetConfig.noCompile && isFederated) {
+            // Compile the RTI files if there is more than one federate.
+            compileRTI()
+        }
+        // In case we are in Eclipse, make sure the generated code is visible.
+        refreshProject()
     }
             
+    /**
+     * FIXME
+     */
+    protected def copySrcGenFilesForFederate(FederateInstance federate) {
+        if (isFederated) {
+            // The C generator produces all the .c files in a single central folder.
+            // However, we need to create a setup.py for each federate and run
+            // "pip install ." individually to compile and install each module
+            // Here, we move the necessary C files into each federate's folder
+            val baseFileName = federate.fileNameForFederate
+            val String srcDir = fileConfig.getSrcGenPath.toString;
+            val String dstDir = fileConfig.getSrcGenPath.toString + File.separator + federate.name
             
+            // Create the directory for federate
+            fileConfig.deleteDirectory(fileConfig.getSrcGenPath.toString + File.separator + federate.name);
+            FileConfig.createDirectories(fileConfig.getSrcGenPath.toString + File.separator + federate.name);
+            
+            var filesToCopy = newArrayList(baseFileName + ".py", baseFileName + ".c", "pythontarget.c",
+                "pythontarget.h", "ctarget.h", "core", "setup.py")
+            for (file : filesToCopy) {
+                FileConfig.copyDirectory(srcDir + File.separator + file, dstDir + File.separator + file)
+            }
+        }
+    }     
     
     /**
      * Copy Python specific target code to the src-gen directory
@@ -1416,7 +1442,7 @@ class PythonGenerator extends CGenerator {
             // Create a PyObject for each reaction
             pr(initializationCode, '''
                 «nameOfSelfStruct»->__py_reaction_function_«reaction.reactionIndex» = 
-                    get_python_function("«fileConfig.name»", 
+                    get_python_function("«federate.fileNameForFederate»", 
                         «nameOfSelfStruct»->__lf_name,
                         «IF (instance.bankIndex > -1)» «instance.bankIndex» «ELSE» «0» «ENDIF»,
                         "«pythonFunctionName»");
@@ -1425,7 +1451,7 @@ class PythonGenerator extends CGenerator {
             if (reaction.definition.deadline !== null) {
                 pr(initializationCode, '''
                 «nameOfSelfStruct»->__py_deadline_function_«reaction.reactionIndex» = 
-                    get_python_function("«fileConfig.name»", 
+                    get_python_function("«federate.fileNameForFederate»", 
                         «nameOfSelfStruct»->__lf_name,
                         «IF (instance.bankIndex > -1)» «instance.bankIndex» «ELSE» «0» «ENDIF»,
                         "deadline_function_«reaction.reactionIndex»");
