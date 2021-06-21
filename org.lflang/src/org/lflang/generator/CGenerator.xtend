@@ -382,389 +382,21 @@ class CGenerator extends GeneratorBase {
             }
         }
         
-        // Create the output directories if they don't yet exist.
+        // Copy the necessary core lib files
+        copyCoreFiles();       
         
-        var dir = fileConfig.getSrcGenPath.toFile
-        if (!dir.exists()) dir.mkdirs()
-        dir = fileConfig.binPath.toFile
-        if (!dir.exists()) dir.mkdirs()
-
-        // Copy the required core library files into the target file system.
-        // This will overwrite previous versions.
-        // Note that net_util.h/c are not used by the infrastructure
-        // unless the program is federated, but they are often useful for user code,
-        // so we include them anyway.
-        var coreFiles = newArrayList("net_util.c", "net_util.h", "reactor_common.c", "reactor.h", "pqueue.c", "pqueue.h", "tag.h", "tag.c", "trace.h", "trace.c", "util.h", "util.c", "platform.h")
-        if (targetConfig.threads === 0) {
-            coreFiles.add("reactor.c")
-        } else {
-            coreFiles.add("reactor_threaded.c")
-        }
-        // Check the operating system
-        val OS = System.getProperty("os.name").toLowerCase();
-        // FIXME: allow for cross-compiling
-        // Based on the detected operating system, copy the required files
-        // to enable platform-specific functionality. See lib/core/platform.h
-        // for more detail.
-        if ((OS.indexOf("mac") >= 0) || (OS.indexOf("darwin") >= 0)) {
-            // Mac support
-            coreFiles.add("platform/lf_POSIX_threads_support.c")
-            coreFiles.add("platform/lf_C11_threads_support.c")
-            coreFiles.add("platform/lf_POSIX_threads_support.h")
-            coreFiles.add("platform/lf_C11_threads_support.h")
-            coreFiles.add("platform/lf_macos_support.c")            
-            coreFiles.add("platform/lf_macos_support.h")
-            // If there is no main reactor, then compilation will produce a .o file requiring further linking.
-            if (mainDef !== null) {
-                targetConfig.compileAdditionalSources.add(fileConfig.getSrcGenPath + File.separator + "core/platform/lf_macos_support.c")
-            }
-        } else if (OS.indexOf("win") >= 0) {
-            // Windows support
-            coreFiles.add("platform/lf_C11_threads_support.c")
-            coreFiles.add("platform/lf_C11_threads_support.h")
-            coreFiles.add("platform/lf_windows_support.c")
-            coreFiles.add("platform/lf_windows_support.h")
-            // If there is no main reactor, then compilation will produce a .o file requiring further linking.
-            if (mainDef !== null) {
-                targetConfig.compileAdditionalSources.add(fileConfig.getSrcGenPath + File.separator + "core/platform/lf_windows_support.c")
-            }
-        } else if (OS.indexOf("nux") >= 0) {
-            // Linux support
-            coreFiles.add("platform/lf_POSIX_threads_support.c")
-            coreFiles.add("platform/lf_C11_threads_support.c")
-            coreFiles.add("platform/lf_POSIX_threads_support.h")
-            coreFiles.add("platform/lf_C11_threads_support.h")
-            coreFiles.add("platform/lf_linux_support.c")
-            coreFiles.add("platform/lf_linux_support.h")
-            // If there is no main reactor, then compilation will produce a .o file requiring further linking.
-            if (mainDef !== null) {
-                targetConfig.compileAdditionalSources.add(fileConfig.getSrcGenPath + File.separator + "core/platform/lf_linux_support.c")
-            }
-        } else {
-            reportError("Platform " + OS + " is not supported")
-        }
-        
-        
-        // If there are federates, copy the required files for that.
-        // Also, create the RTI C file and the launcher script.
-        if (isFederated) {
-            coreFiles.addAll("rti.c", "rti.h", "federate.c", "federate.h", "clock-sync.h", "clock-sync.c")
-            createFederateRTI()
-            createLauncher(coreFiles)
-        }
-        
-        copyFilesFromClassPath("/lib/core", fileConfig.getSrcGenPath + File.separator + "core", coreFiles)
-        
-        copyTargetHeaderFile()
-
-        // Perform distinct code generation into distinct files for each federate.
-        val baseFilename = topLevelName
-        
-        var commonCode = code;
-        var commonStartTimers = startTimers;
-        var compilationSucceeded = true
-        for (federate : federates) {
-            startTimeStepIsPresentCount = 0
-            startTimeStepTokens = 0
+        var compilationSucceeded = true;
+        var commonCode = code; // Common code between federates
+        for (federate : federates) {            
+            // Perform distinct code generation into distinct files for each federate.
+            generateCodeForFederate(federate, commonCode);
             
+            // Put the generate code into files
+            generateOutputFilesForFederate(federate);
             
-            // If federated, append the federate name to the file name.
-            // Only generate one output if there is no federation.
-            if (isFederated) {
-                topLevelName = baseFilename + '_' + federate.name // FIXME: don't (temporarily) reassign a class variable for this
-                // Clear out previously generated code.
-                code = new StringBuilder(commonCode)
-                initializeTriggerObjects = new StringBuilder()
-                initializeTriggerObjectsEnd = new StringBuilder()                
-                        
-                // Enable clock synchronization if the federate is not local and clock-sync is enabled
-                initializeClockSynchronization(federate)
-                
-
-                startTimeStep = new StringBuilder()
-                startTimers = new StringBuilder(commonStartTimers)
-            }
-        
-            // Build the instantiation tree if a main reactor is present.
-            if (this.mainDef !== null) {
-                generateReactorFederated(this.mainDef.reactorClass, federate)
-                if (this.main === null) {
-                    // Recursively build instances. This is done once because
-                    // it is the same for all federates.
-                    this.main = new ReactorInstance(mainDef.reactorClass.toDefinition, this, 
-                        this.unorderedReactions)
-                    this.reactionGraph = new ReactionInstanceGraph(main)
-                }   
-            }
-        
-            // Derive target filename from the .lf filename.
-            val cFilename = getTargetFileName(topLevelName);
-
-            // Delete source previously produced by the LF compiler.
-            var file = fileConfig.getSrcGenPath.resolve(cFilename).toFile
-            if (file.exists) {
-                file.delete
-            }
-
-            // Delete binary previously produced by the C compiler.
-            file = fileConfig.binPath.resolve(topLevelName).toFile
-            if (file.exists) {
-                file.delete
-            }
-
-            // Generate main instance, if there is one.
-            // Note that any main reactors in imported files are ignored.        
-            if (this.main !== null) {
-                generateReactorInstance(this.main, federate)
-                // Generate function to set default command-line options.
-                // A literal array needs to be given outside any function definition,
-                // so start with that.
-                if (runCommand.length > 0) {
-                    pr('char* __default_argv[] = {"' + runCommand.join('", "') + '"};')
-                }
-                pr('void __set_default_command_line_options() {\n')
-                indent()
-                if (runCommand.length > 0) {
-                    pr('default_argc = ' + runCommand.length + ';')
-                    pr('default_argv = __default_argv;')
-                }
-                unindent()
-                pr('}\n')
-                
-                // If there are timers, create a table of timers to be initialized.
-                if (timerCount > 0) {
-                    pr('''
-                        // Array of pointers to timer triggers to be scheduled in __initialize_timers().
-                        trigger_t* __timer_triggers[«timerCount»];
-                    ''')
-                } else {
-                    pr('''
-                        // Array of pointers to timer triggers to be scheduled in __initialize_timers().
-                        trigger_t** __timer_triggers = NULL;
-                    ''')
-                }
-                pr('''
-                    int __timer_triggers_size = «timerCount»;
-                ''')
-                
-                // If there are startup reactions, store them in an array.
-                if (startupReactionCount > 0) {
-                    pr('''
-                        // Array of pointers to timer triggers to be scheduled in __trigger_startup_reactions().
-                        reaction_t* __startup_reactions[«startupReactionCount»];
-                    ''')
-                } else {
-                    pr('''
-                        // Array of pointers to reactions to be scheduled in __trigger_startup_reactions().
-                        reaction_t** __startup_reactions = NULL;
-                    ''')
-                }
-                pr('''
-                    int __startup_reactions_size = «startupReactionCount»;
-                ''')
-                
-                // If there are shutdown reactions, create a table of triggers.
-                if (shutdownReactionCount > 0) {
-                    pr('''
-                        // Array of pointers to shutdown triggers.
-                        reaction_t* __shutdown_reactions[«shutdownReactionCount»];
-                    ''')
-                } else {
-                    pr('''
-                        // Empty array of pointers to shutdown triggers.
-                        reaction_t** __shutdown_reactions = NULL;
-                    ''')
-                }
-                pr('''
-                    int __shutdown_reactions_size = «shutdownReactionCount»;
-                ''')
-                
-                // Generate function to return a pointer to the action trigger_t
-                // that handles incoming network messages destined to the specified
-                // port. This will only be used if there are federates.
-                if (federate.networkMessageActions.size > 0) {
-                    pr('''trigger_t* __action_table[«federate.networkMessageActions.size»];''')
-                }
-                pr('trigger_t* __action_for_port(int port_id) {\n')
-                indent()
-                if (federate.networkMessageActions.size > 0) {
-                    // Create a static array of trigger_t pointers.
-                    // networkMessageActions is a list of Actions, but we
-                    // need a list of trigger struct names for ActionInstances.
-                    // There should be exactly one ActionInstance in the
-                    // main reactor for each Action.
-                    val triggers = new LinkedList<String>()
-                    for (action : federate.networkMessageActions) {
-                        // Find the corresponding ActionInstance.
-                        val actionInstance = main.lookupActionInstance(action)
-                        triggers.add(triggerStructName(actionInstance))
-                    }
-                    var actionTableCount = 0
-                    for (trigger : triggers) {
-                        pr(initializeTriggerObjects, '''
-                            __action_table[«actionTableCount++»] = &«trigger»;
-                        ''')
-                    }
-                    pr('''
-                        if (port_id < «federate.networkMessageActions.size») {
-                            return __action_table[port_id];
-                        } else {
-                            return NULL;
-                        }
-                    ''')
-                } else {
-                    pr('return NULL;')
-                }
-                unindent()
-                pr('}\n')
-                
-                // Generate function to initialize the trigger objects for all reactors.
-                pr('void __initialize_trigger_objects() {\n')
-                indent()
-                
-                // Create the table used to decrement reference counts between time steps.
-                if (startTimeStepTokens > 0) {
-                    // Allocate the initial (before mutations) array of pointers to tokens.
-                    pr('''
-                        __tokens_with_ref_count_size = «startTimeStepTokens»;
-                        __tokens_with_ref_count = (token_present_t*)malloc(«startTimeStepTokens» * sizeof(token_present_t));
-                    ''')
-                }
-                // Create the table to initialize is_present fields to false between time steps.
-                if (startTimeStepIsPresentCount > 0) {
-                    // Allocate the initial (before mutations) array of pointers to _is_present fields.
-                    pr('''
-                        // Create the array that will contain pointers to is_present fields to reset on each step.
-                        __is_present_fields_size = «startTimeStepIsPresentCount»;
-                        __is_present_fields = (bool**)malloc(«startTimeStepIsPresentCount» * sizeof(bool*));
-                    ''')
-                }
-                
-                // Allocate the memory for triggers used in federated execution
-                pr(CGeneratorExtension.allocateTriggersForFederate(federate, this));
-                // Assign appropriate pointers to the triggers
-                pr(initializeTriggerObjectsEnd,
-                    CGeneratorExtension.initializeTriggerForControlReactions(this.main, federate, this));
-                
-                pr(initializeTriggerObjects.toString)
-                pr('// Populate arrays of trigger pointers.')
-                pr(initializeTriggerObjectsEnd.toString)
-                doDeferredInitialize(federate)
-                
-                // Put the code here to set up the tables that drive resetting is_present and
-                // decrementing reference counts between time steps. This code has to appear
-                // in __initialize_trigger_objects() after the code that makes connections
-                // between inputs and outputs.
-                pr(startTimeStep.toString)
-                
-                setReactionPriorities(main, federate)
-                
-                // Calculate the epoch offset so that subsequent calls
-                // to get_physical_time() return epoch time.
-                pr('''
-                    calculate_epoch_offset();
-                ''')
-                
-                initializeFederate(federate)
-                unindent()
-                pr('}\n')
-
-                // Generate function to trigger startup reactions for all reactors.
-                pr("void __trigger_startup_reactions() {")
-                indent()
-                pr(startTimers.toString) // FIXME: these are actually startup actions, not timers.
-                if (startupReactionCount > 0) {
-                    pr('''
-                       for (int i = 0; i < __startup_reactions_size; i++) {
-                           if (__startup_reactions[i] != NULL) {
-                               _lf_enqueue_reaction(__startup_reactions[i]);
-                           }
-                       }
-                    ''')
-                }
-                unindent()
-                pr("}")
-
-                // Generate function to schedule timers for all reactors.
-                pr("void __initialize_timers() {")
-                indent()
-                if (targetConfig.tracing !== null) {
-                    var traceFileName = topLevelName;
-                    if (targetConfig.tracing.traceFileName !== null) {
-                        traceFileName = targetConfig.tracing.traceFileName;
-                        // Since all federates would have the same name, we need to append the federate name.
-                        if (!federate.isSingleton()) {
-                            traceFileName += "_" + federate.name;
-                        }
-                    }
-                    pr('''start_trace("«traceFileName».lft");''') // .lft is for Lingua Franca trace
-                }
-                if (timerCount > 0) {
-                    pr('''
-                       for (int i = 0; i < __timer_triggers_size; i++) {
-                           if (__timer_triggers[i] != NULL) {
-                               _lf_initialize_timer(__timer_triggers[i]);
-                           }
-                       }
-                    ''')
-                }
-                unindent()
-                pr("}")
-
-                // Generate a function that will either do nothing
-                // (if there is only one federate or the coordination 
-                // is set to decentralized) or, if there are
-                // downstream federates, will notify the RTI
-                // that the specified logical time is complete.
-                pr('''
-                    void logical_tag_complete(tag_t tag_to_send) {
-                        «IF isFederatedAndCentralized»
-                            _lf_logical_tag_complete(tag_to_send);
-                        «ENDIF»
-                    }
-                ''')
-                                
-                // Generate function to schedule shutdown reactions if any
-                // reactors have reactions to shutdown.
-                pr('''
-                    bool __trigger_shutdown_reactions() {                          
-                        for (int i = 0; i < __shutdown_reactions_size; i++) {
-                            if (__shutdown_reactions[i] != NULL) {
-                                _lf_enqueue_reaction(__shutdown_reactions[i]);
-                            }
-                        }
-                        // Return true if there are shutdown reactions.
-                        return (__shutdown_reactions_size > 0);
-                    }
-                ''')
-                
-                // Generate an empty termination function for non-federated
-                // execution. For federated execution, an implementation is
-                // provided in federate.c.  That implementation will resign
-                // from the federation and close any open sockets.
-                if (!isFederated) {
-                    pr("void terminate_execution() {}");
-                }
-            }
-            val targetFile = fileConfig.getSrcGenPath + File.separator + cFilename
-            writeSourceCodeToFile(getCode().getBytes(), targetFile)
-            
-            // Create docker file.
-            if (targetConfig.dockerOptions !== null) {
-                writeDockerFile(topLevelName)
-            }
-
-            // If this code generator is directly compiling the code, compile it now so that we
-            // clean it up after, removing the #line directives after errors have been reported.
-            if (!targetConfig.noCompile && targetConfig.buildCommands.nullOrEmpty) {
-                if (!runCCompiler(topLevelName, true)) {
-                    compilationSucceeded = false
-                }
-                writeSourceCodeToFile(getCode.removeLineDirectives.getBytes(), targetFile)
-            }
+            // Compile the generate files and get the compile status, to be checked later.
+            compilationSucceeded = compileCodeForFederate(federate);
         }
-        // Restore the base filename.
-        topLevelName = baseFilename
         
         // If a build directive has been given, invoke it now.
         // Note that the code does not get cleaned in this case.
@@ -783,6 +415,450 @@ class CGenerator extends GeneratorBase {
         }
         // In case we are in Eclipse, make sure the generated code is visible.
         refreshProject()
+    }
+    
+     /**
+     * Generate code for 'federate' using the 'preamble' as a starting point. 
+     */
+    def generateCodeForFederate(FederateInstance federate, StringBuilder preamble) {
+        var commonStartTimers = startTimers;
+        startTimeStepIsPresentCount = 0
+        startTimeStepTokens = 0
+
+        // Only generate one output if there is no federation.
+        if (isFederated) {
+            // Clear out previously generated code.
+            code = new StringBuilder(preamble)
+            initializeTriggerObjects = new StringBuilder()
+            initializeTriggerObjectsEnd = new StringBuilder()
+
+            // Enable clock synchronization if the federate is not local and clock-sync is enabled
+            initializeClockSynchronization(federate)
+
+            startTimeStep = new StringBuilder()
+            startTimers = new StringBuilder(commonStartTimers)
+        }
+
+        // Build the instantiation tree if a main reactor is present.
+        if (this.mainDef !== null) {
+            generateReactorFederated(this.mainDef.reactorClass, federate)
+            if (this.main === null) {
+                // Recursively build instances. This is done once because
+                // it is the same for all federates.
+                this.main = new ReactorInstance(mainDef.reactorClass.toDefinition, this, this.unorderedReactions)
+                this.reactionGraph = new ReactionInstanceGraph(main)
+            }
+        }
+
+        // Generate main instance, if there is one.       
+        if (this.main !== null) {
+            generateMainInstanceForFederate(federate)
+        }
+    }
+    
+    /**
+     * Compile the code for 'federate'.
+     * 
+     * @return true if compile is successful. false on error.
+     */
+    def compileCodeForFederate(FederateInstance federate) {
+        val String filename = federate.fileNameForFederate;
+        // Derive target filename from the .lf filename.
+        val cFilename = getTargetFileName(filename);
+        val targetFile = fileConfig.getSrcGenPath + File.separator + cFilename
+
+        // If this code generator is directly compiling the code, compile it now so that we
+        // clean it up after, removing the #line directives after errors have been reported.
+        if (!targetConfig.noCompile && targetConfig.buildCommands.nullOrEmpty) {
+            if (!runCCompiler(filename, true)) {
+                return false;
+            }
+            writeSourceCodeToFile(getCode.removeLineDirectives.getBytes(), targetFile)
+        }
+        return true;
+    }
+    
+    /**
+     * Create the source file for 'federate' and write its code to the file.
+     * Also creates the appropriate docker file for 'federate' if requested.
+     */
+    def generateOutputFilesForFederate(FederateInstance federate) {
+        val String filename = federate.fileNameForFederate;
+
+        // Derive target filename from the .lf filename.
+        val cFilename = getTargetFileName(filename);
+
+        // Delete source previously produced by the LF compiler.
+        var file = fileConfig.getSrcGenPath.resolve(cFilename).toFile
+        if (file.exists) {
+            file.delete
+        }
+
+        // Delete binary previously produced by the C compiler.
+        file = fileConfig.binPath.resolve(filename).toFile
+        if (file.exists) {
+            file.delete
+        }
+
+        val targetFile = fileConfig.getSrcGenPath + File.separator + cFilename
+        writeSourceCodeToFile(getCode().getBytes(), targetFile)
+
+        // Create docker file.
+        if (targetConfig.dockerOptions !== null) {
+            writeDockerFile(filename)
+        }
+    }
+    
+    /**
+     * Return the filename for a given federate.
+     * 
+     * If the program is federated, the top-level name
+     * of the instantiation of the federate is appended 
+     * to the original .lf file name.
+     */
+    def getFileNameForFederate(FederateInstance federate) {
+        if (isFederated) {
+            return fileConfig.name + '_' + federate.name            
+        } else {
+            return fileConfig.name
+        }
+    }
+    
+    /**
+     * Generate the main instance for 'federate'. 
+     * Note that any main reactors in imported files are ignored. 
+     * 
+     * FIXME: Still a very long function.
+     */
+    def generateMainInstanceForFederate(FederateInstance federate) {
+        val String filename = federate.fileNameForFederate;
+
+        generateReactorInstance(this.main, federate)
+        // Generate function to set default command-line options.
+        // A literal array needs to be given outside any function definition,
+        // so start with that.
+        if (runCommand.length > 0) {
+            pr('char* __default_argv[] = {"' + runCommand.join('", "') + '"};')
+        }
+        pr('void __set_default_command_line_options() {\n')
+        indent()
+        if (runCommand.length > 0) {
+            pr('default_argc = ' + runCommand.length + ';')
+            pr('default_argv = __default_argv;')
+        }
+        unindent()
+        pr('}\n')
+
+        // If there are timers, create a table of timers to be initialized.
+        if (timerCount > 0) {
+            pr('''
+                // Array of pointers to timer triggers to be scheduled in __initialize_timers().
+                trigger_t* __timer_triggers[«timerCount»];
+            ''')
+        } else {
+            pr('''
+                // Array of pointers to timer triggers to be scheduled in __initialize_timers().
+                trigger_t** __timer_triggers = NULL;
+            ''')
+        }
+        pr('''
+            int __timer_triggers_size = «timerCount»;
+        ''')
+
+        // If there are startup reactions, store them in an array.
+        if (startupReactionCount > 0) {
+            pr('''
+                // Array of pointers to timer triggers to be scheduled in __trigger_startup_reactions().
+                reaction_t* __startup_reactions[«startupReactionCount»];
+            ''')
+        } else {
+            pr('''
+                // Array of pointers to reactions to be scheduled in __trigger_startup_reactions().
+                reaction_t** __startup_reactions = NULL;
+            ''')
+        }
+        pr('''
+            int __startup_reactions_size = «startupReactionCount»;
+        ''')
+
+        // If there are shutdown reactions, create a table of triggers.
+        if (shutdownReactionCount > 0) {
+            pr('''
+                // Array of pointers to shutdown triggers.
+                reaction_t* __shutdown_reactions[«shutdownReactionCount»];
+            ''')
+        } else {
+            pr('''
+                // Empty array of pointers to shutdown triggers.
+                reaction_t** __shutdown_reactions = NULL;
+            ''')
+        }
+        pr('''
+            int __shutdown_reactions_size = «shutdownReactionCount»;
+        ''')
+
+        // Generate function to return a pointer to the action trigger_t
+        // that handles incoming network messages destined to the specified
+        // port. This will only be used if there are federates.
+        if (federate.networkMessageActions.size > 0) {
+            pr('''trigger_t* __action_table[«federate.networkMessageActions.size»];''')
+        }
+        pr('trigger_t* __action_for_port(int port_id) {\n')
+        indent()
+        if (federate.networkMessageActions.size > 0) {
+            // Create a static array of trigger_t pointers.
+            // networkMessageActions is a list of Actions, but we
+            // need a list of trigger struct names for ActionInstances.
+            // There should be exactly one ActionInstance in the
+            // main reactor for each Action.
+            val triggers = new LinkedList<String>()
+            for (action : federate.networkMessageActions) {
+                // Find the corresponding ActionInstance.
+                val actionInstance = main.lookupActionInstance(action)
+                triggers.add(triggerStructName(actionInstance))
+            }
+            var actionTableCount = 0
+            for (trigger : triggers) {
+                pr(initializeTriggerObjects, '''
+                    __action_table[«actionTableCount++»] = &«trigger»;
+                ''')
+            }
+            pr('''
+                if (port_id < «federate.networkMessageActions.size») {
+                    return __action_table[port_id];
+                } else {
+                    return NULL;
+                }
+            ''')
+        } else {
+            pr('return NULL;')
+        }
+        unindent()
+        pr('}\n')
+
+        // Generate function to initialize the trigger objects for all reactors.
+        pr('void __initialize_trigger_objects() {\n')
+        indent()
+
+        // Create the table used to decrement reference counts between time steps.
+        if (startTimeStepTokens > 0) {
+            // Allocate the initial (before mutations) array of pointers to tokens.
+            pr('''
+                __tokens_with_ref_count_size = «startTimeStepTokens»;
+                __tokens_with_ref_count = (token_present_t*)malloc(«startTimeStepTokens» * sizeof(token_present_t));
+            ''')
+        }
+        // Create the table to initialize is_present fields to false between time steps.
+        if (startTimeStepIsPresentCount > 0) {
+            // Allocate the initial (before mutations) array of pointers to _is_present fields.
+            pr('''
+                // Create the array that will contain pointers to is_present fields to reset on each step.
+                __is_present_fields_size = «startTimeStepIsPresentCount»;
+                __is_present_fields = (bool**)malloc(«startTimeStepIsPresentCount» * sizeof(bool*));
+            ''')
+        }
+
+        // Allocate the memory for triggers used in federated execution
+        pr(CGeneratorExtension.allocateTriggersForFederate(federate, this));
+        // Assign appropriate pointers to the triggers
+        pr(initializeTriggerObjectsEnd,
+            CGeneratorExtension.initializeTriggerForControlReactions(this.main, federate, this));
+
+        pr(initializeTriggerObjects.toString)
+        pr('// Populate arrays of trigger pointers.')
+        pr(initializeTriggerObjectsEnd.toString)
+        doDeferredInitialize(federate)
+
+        // Put the code here to set up the tables that drive resetting is_present and
+        // decrementing reference counts between time steps. This code has to appear
+        // in __initialize_trigger_objects() after the code that makes connections
+        // between inputs and outputs.
+        pr(startTimeStep.toString)
+
+        setReactionPriorities(main, federate)
+
+        // Calculate the epoch offset so that subsequent calls
+        // to get_physical_time() return epoch time.
+        pr('''
+            calculate_epoch_offset();
+        ''')
+
+        initializeFederate(federate)
+        unindent()
+        pr('}\n')
+
+        // Generate function to trigger startup reactions for all reactors.
+        pr("void __trigger_startup_reactions() {")
+        indent()
+        pr(startTimers.toString) // FIXME: these are actually startup actions, not timers.
+        if (startupReactionCount > 0) {
+            pr('''
+                for (int i = 0; i < __startup_reactions_size; i++) {
+                    if (__startup_reactions[i] != NULL) {
+                        _lf_enqueue_reaction(__startup_reactions[i]);
+                    }
+                }
+            ''')
+        }
+        unindent()
+        pr("}")
+
+        // Generate function to schedule timers for all reactors.
+        pr("void __initialize_timers() {")
+        indent()
+        if (targetConfig.tracing !== null) {
+            var traceFileName = filename;
+            if (targetConfig.tracing.traceFileName !== null) {
+                traceFileName = targetConfig.tracing.traceFileName;
+                // Since all federates would have the same name, we need to append the federate name.
+                if (!federate.isSingleton()) {
+                    traceFileName += "_" + federate.name;
+                }
+            }
+            pr('''start_trace("«traceFileName».lft");''') // .lft is for Lingua Franca trace
+        }
+        if (timerCount > 0) {
+            pr('''
+                for (int i = 0; i < __timer_triggers_size; i++) {
+                    if (__timer_triggers[i] != NULL) {
+                        _lf_initialize_timer(__timer_triggers[i]);
+                    }
+                }
+            ''')
+        }
+        unindent()
+        pr("}")
+
+        // Generate a function that will either do nothing
+        // (if there is only one federate or the coordination 
+        // is set to decentralized) or, if there are
+        // downstream federates, will notify the RTI
+        // that the specified logical time is complete.
+        pr('''
+            void logical_tag_complete(tag_t tag_to_send) {
+                «IF isFederatedAndCentralized»
+                    _lf_logical_tag_complete(tag_to_send);
+                «ENDIF»
+            }
+        ''')
+
+        // Generate function to schedule shutdown reactions if any
+        // reactors have reactions to shutdown.
+        pr('''
+            bool __trigger_shutdown_reactions() {                          
+                for (int i = 0; i < __shutdown_reactions_size; i++) {
+                    if (__shutdown_reactions[i] != NULL) {
+                        _lf_enqueue_reaction(__shutdown_reactions[i]);
+                    }
+                }
+                // Return true if there are shutdown reactions.
+                return (__shutdown_reactions_size > 0);
+            }
+        ''')
+
+        // Generate an empty termination function for non-federated
+        // execution. For federated execution, an implementation is
+        // provided in federate.c.  That implementation will resign
+        // from the federation and close any open sockets.
+        if (!isFederated) {
+            pr("void terminate_execution() {}");
+        }
+    }
+    
+    /**
+     * Copy the required core library files into the target file system.
+     * 
+     * This will overwrite previous versions.
+     * Note that net_util.h/c are not used by the infrastructure
+     * unless the program is federated, but they are often useful for user code,
+     * so we include them anyway.
+     */
+    def copyCoreFiles() {
+        // Create the output directories if they don't yet exist.        
+        var dir = fileConfig.getSrcGenPath.toFile
+        if (!dir.exists()) dir.mkdirs()
+        dir = fileConfig.binPath.toFile
+        if (!dir.exists()) dir.mkdirs()
+
+        
+        var coreFiles = newArrayList("net_util.c", "net_util.h", "reactor_common.c", "reactor.h", "pqueue.c",
+            "pqueue.h", "tag.h", "tag.c", "trace.h", "trace.c", "util.h", "util.c", "platform.h")
+        if (targetConfig.threads === 0) {
+            coreFiles.add("reactor.c")
+        } else {
+            coreFiles.add("reactor_threaded.c")
+        }
+        
+        coreFiles.addAll(platformSupportFiles());        
+        
+        // If there are federates, copy the required files for that.
+        // Also, create the RTI C file and the launcher script.
+        if (isFederated) {
+            coreFiles.addAll("rti.c", "rti.h", "federate.c", "federate.h", "clock-sync.h", "clock-sync.c")
+            createFederateRTI()
+            createLauncher(coreFiles)
+        }
+        
+        copyFilesFromClassPath("/lib/core", fileConfig.getSrcGenPath + File.separator + "core", coreFiles)
+        
+        copyTargetHeaderFile()
+
+    }
+    
+    /**
+     * Get a list of the necessary platform support files.
+     * 
+     * Platform support files implement system-dependent APIs and enable a more platform-abstracted LF core runtime.
+     */
+    def platformSupportFiles() {
+        var platformSupportFiles = newArrayList();
+        // Check the operating system
+        val OS = System.getProperty("os.name").toLowerCase();
+        // FIXME: allow for cross-compiling
+        // Based on the detected operating system, copy the required files
+        // to enable platform-specific functionality. See lib/core/platform.h
+        // for more detail.
+        if ((OS.indexOf("mac") >= 0) || (OS.indexOf("darwin") >= 0)) {
+            // Mac support
+            platformSupportFiles.add("platform/lf_POSIX_threads_support.c")
+            platformSupportFiles.add("platform/lf_C11_threads_support.c")
+            platformSupportFiles.add("platform/lf_POSIX_threads_support.h")
+            platformSupportFiles.add("platform/lf_C11_threads_support.h")
+            platformSupportFiles.add("platform/lf_macos_support.c")            
+            platformSupportFiles.add("platform/lf_macos_support.h")
+            // If there is no main reactor, then compilation will produce a .o file requiring further linking.
+            if (mainDef !== null) {
+                targetConfig.compileAdditionalSources.add(fileConfig.getSrcGenPath + File.separator +
+                    "core/platform/lf_macos_support.c")
+            }
+        } else if (OS.indexOf("win") >= 0) {
+            // Windows support
+            platformSupportFiles.add("platform/lf_C11_threads_support.c")
+            platformSupportFiles.add("platform/lf_C11_threads_support.h")
+            platformSupportFiles.add("platform/lf_windows_support.c")
+            platformSupportFiles.add("platform/lf_windows_support.h")
+            // If there is no main reactor, then compilation will produce a .o file requiring further linking.
+            if (mainDef !== null) {
+                targetConfig.compileAdditionalSources.add(fileConfig.getSrcGenPath + File.separator +
+                    "core/platform/lf_windows_support.c")
+            }
+        } else if (OS.indexOf("nux") >= 0) {
+            // Linux support
+            platformSupportFiles.add("platform/lf_POSIX_threads_support.c")
+            platformSupportFiles.add("platform/lf_C11_threads_support.c")
+            platformSupportFiles.add("platform/lf_POSIX_threads_support.h")
+            platformSupportFiles.add("platform/lf_C11_threads_support.h")
+            platformSupportFiles.add("platform/lf_linux_support.c")
+            platformSupportFiles.add("platform/lf_linux_support.h")
+            // If there is no main reactor, then compilation will produce a .o file requiring further linking.
+            if (mainDef !== null) {
+                targetConfig.compileAdditionalSources.add(fileConfig.getSrcGenPath + File.separator +
+                    "core/platform/lf_linux_support.c")
+            }
+        } else {
+            reportError("Platform " + OS + " is not supported")
+        }
+        return platformSupportFiles;
     }
     
     /**
@@ -816,7 +892,7 @@ class CGenerator extends GeneratorBase {
             additionalFiles = '''COPY "«targetConfig.fileNames.join('" "')»" "src-gen/"'''
         }
         pr(contents, '''
-            # Generated docker file for «topLevelName».lf in «srcGenPath».
+            # Generated docker file for «fileConfig.name».lf in «srcGenPath».
             # For instructions, see: https://github.com/icyphy/lingua-franca/wiki/Containerized-Execution
             FROM «targetConfig.dockerOptions.from»
             WORKDIR /lingua-franca
@@ -1006,7 +1082,8 @@ class CGenerator extends GeneratorBase {
     ////////////////////////////////////////////
     //// Code generators.
     
-    /** Create the runtime infrastructure (RTI) source file.
+    /**
+     * Create the runtime infrastructure (RTI) source file.
      */
     override createFederateRTI() {
         // Derive target filename from the .lf filename.
@@ -1021,7 +1098,7 @@ class CGenerator extends GeneratorBase {
         }
 
         // Delete binary previously produced by the C compiler.
-        file = fileConfig.binPath.resolve(topLevelName).toFile
+        file = fileConfig.binPath.resolve(fileConfig.name).toFile
         if (file.exists) {
             file.delete
         }
@@ -3762,7 +3839,9 @@ class CGenerator extends GeneratorBase {
                 var type = (action.definition as Action).inferredType
                 var payloadSize = "0"
                 
-                if (!type.isUndefined) {
+                // Initialize the token if the type of action is undefined
+                // or if the target does not require types.
+                if (!type.isUndefined || !target.requiresTypes) {
                     var String typeStr = type.targetType
                     if (isTokenType(type)) {
                         typeStr = typeStr.rootType
@@ -4617,7 +4696,7 @@ class CGenerator extends GeneratorBase {
         if (targetConfig.fastMode) {
             // The runCommand has a first entry that is ignored but needed.
             if (runCommand.length === 0) {
-                runCommand.add(topLevelName)
+                runCommand.add(fileConfig.name)
             }
             runCommand.add("-f")
             runCommand.add("true")
@@ -4625,7 +4704,7 @@ class CGenerator extends GeneratorBase {
         if (targetConfig.keepalive) {
             // The runCommand has a first entry that is ignored but needed.
             if (runCommand.length === 0) {
-                runCommand.add(topLevelName)
+                runCommand.add(fileConfig.name)
             }
             runCommand.add("-k")
             runCommand.add("true")
@@ -4633,7 +4712,7 @@ class CGenerator extends GeneratorBase {
         if (targetConfig.timeout !== null) {
             // The runCommand has a first entry that is ignored but needed.
             if (runCommand.length === 0) {
-                runCommand.add(topLevelName)
+                runCommand.add(fileConfig.name)
             }
             runCommand.add("-o")
             runCommand.add(targetConfig.timeout.time.toString)
@@ -5013,8 +5092,8 @@ class CGenerator extends GeneratorBase {
             «action.name»->has_value = («tokenPointer» != NULL && «tokenPointer»->value != NULL);
             «action.name»->token = «tokenPointer»;
         ''')
-        // Set the value field only if there is a type.
-        if (!type.isUndefined) {
+        // Set the value field only if there is a type or if the target does not require a type.
+        if (!type.isUndefined || !target.requiresTypes) {
             // The value field will either be a copy (for primitive types)
             // or a pointer (for types ending in *).
             pr(action, builder, '''
