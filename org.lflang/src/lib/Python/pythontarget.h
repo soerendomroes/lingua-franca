@@ -80,22 +80,33 @@ PyObject *globalPythonModuleDict = NULL;
 
 
 /**
- * The struct used to instantiate a port
- * in Lingua Franca. This template is used 
- * in the PythonGenerator instead of redefining
- * a struct for each port.
- * This template can be used for any Python object,
- * including lists and tuples.
+ * The struct used to instantiate a port in the Python target. This template is
+ * used in the PythonGenerator instead of redefining a struct for each port
+ * (which is what is done in the base CGenerator). This template can be used for
+ * any Python object, including lists and tuples.
+ * 
  * PyObject* value: the value of the port with the generic Python type
+ * 
  * is_present: indicates if the value of the port is present
- *             at the current logical time
+ *  at the current logical time
+ * 
  * num_destinations: used for reference counting the number of
- *                   connections to destinations.
+ *  connections to destinations.
+ * 
+ * intended_tag: The original intended tag for the port if it is present.
+ *  If intended tag differs from current tag, the message is tardy.
+ * 
+ * physical_time_of_arrival: The physical time at which the message has
+ *  arrived at the destination. Can be used to test a physical STP threshold.
  **/
 typedef struct {
     PyObject* value;
     bool is_present;
     int num_destinations;
+#ifdef FEDERATED
+    tag_t intended_tag;
+    instant_t physical_time_of_arrival;
+#endif
 } generic_port_instance_struct;
 
 /**
@@ -143,6 +154,42 @@ typedef struct {
     lf_token_t* token;
     int length;
 } generic_port_instance_with_token_struct;
+
+/**
+ * The struct used to instantiate an action in the Python target. This template
+ * is used in the PythonGenerator instead of redefining a struct for each action
+ * (which is what is done in the base CGenerator). This template can be used for
+ * any Python object, including lists and tuples.
+ * 
+ * trigger_t* trigger: The trigger associated with the action.
+ * 
+ * PyObject* value: The value of the port with the generic Python type
+ * 
+ * is_present: Indicates if the value of the port is present
+ *  at the current logical time
+ * 
+ * has_value: Indicates whether the action carries a value or not.
+ * 
+ * lf_token_t* token: Can be used to carry a token around. Mostly useful for
+ *  internal use in the CGenerator.
+ * 
+ * intended_tag: The original intended tag for the port if it is present.
+ *  If intended tag differs from current tag, the message is tardy.
+ * 
+ * physical_time_of_arrival: The physical time at which the message has
+ *  arrived at the destination. Can be used to test a physical STP threshold.
+ **/
+typedef struct {
+    trigger_t* trigger;
+    PyObject* value;
+    bool is_present;
+    bool has_value;
+    lf_token_t* token;
+#ifdef FEDERATED
+    tag_t intended_tag;
+    instant_t physical_time_of_arrival;
+#endif
+} generic_action_instance_struct;
 
 
 /**
