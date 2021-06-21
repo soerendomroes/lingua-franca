@@ -31,6 +31,7 @@ import org.eclipse.xtext.generator.IFileSystemAccess2
 import org.eclipse.xtext.generator.IGeneratorContext
 import org.lflang.Target
 import org.lflang.lf.TargetDecl
+import org.lflang.generator.python.PythonGenerator
 
 /**
  * Generates code from your model files on save.
