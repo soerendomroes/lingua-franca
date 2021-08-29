@@ -184,6 +184,10 @@ class TargetConfig {
      */
     public TracingOptions tracing = null
     
+    /**
+     * Directive to generate a UCLID model for formal analysis.
+     */
+    public boolean uclid_model = false
 }
 
 /**

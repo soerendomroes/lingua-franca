@@ -165,6 +165,16 @@ public class LFGenerator extends AbstractGenerator {
             generator.doGenerate(resource, fsa, context);
             generatorErrorsOccurred = generator.errorsOccurred();
         }
+        
+        // If the verification flag is true, generate a UCLID5 model from
+        // the static information.
+        if (generator.targetConfig.uclid_model) {
+            System.out.println("===================================");
+            System.out.println("Generating a UCLID model");
+            GeneratorBase uclid_gen = new UCLIDGenerator(fileConfig, errorReporter);
+            uclid_gen.doGenerate(resource, fsa, context);
+            System.out.println("===================================");
+        }
     }
 
     /** Return true if errors occurred in the last call to doGenerate(). */

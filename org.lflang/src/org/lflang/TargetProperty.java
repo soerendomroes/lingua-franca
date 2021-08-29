@@ -307,6 +307,14 @@ public enum TargetProperty {
                         }
                     }
                 }
+            }),
+    
+    /**
+     * Directive to generate a UCLID model for formal analysis.
+     */
+    UCLID_MODEL("uclid-model", PrimitiveType.BOOLEAN, Arrays.asList(Target.ALL),
+            (config, value) -> {
+                config.uclid_model = ASTUtils.toBoolean(value);
             });
     
     /**
