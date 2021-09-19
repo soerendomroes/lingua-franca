@@ -73,6 +73,7 @@ typedef _lf_thread_t lf_thread_t;        // Type to hold handle to a thread
 #endif
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 /**
  * Time instant. Both physical and logical times are represented
  * using this typedef.
@@ -89,6 +90,8 @@ typedef _interval_t interval_t;
  */
 typedef _microstep_t microstep_t;
 =======
+=======
+>>>>>>> ef99eb96f1dc17a1287be1cfd5fdd375d0809ca2
 typedef struct timespec lf_time_spec_t;  // Type to hold time in a traditional {second, nanosecond} POSIX format
 typedef _lf_clock_t lf_clock_t;          // Type to hold a clock identifier (e.g., CLOCK_REALTIME on POSIX)
 >>>>>>> 6f178c966 (tested for cross compilation with linux and mac, still has minor bugs for baremetal support)
@@ -176,6 +179,7 @@ extern int lf_cond_timedwait(lf_cond_t* cond, lf_mutex_t* mutex, instant_t absol
 #endif
 
 /**
+<<<<<<< HEAD
  * Initialize the LF clock. Must be called before using other clock-related APIs.
  */
 extern void lf_initialize_clock();
@@ -190,6 +194,17 @@ extern void lf_initialize_clock();
  * @return 0 for success, or -1 for failure
  */
 extern int lf_clock_gettime(instant_t* t);
+=======
+ * Fetch the value of an internal (and platform-specific) physical clock and 
+ * store it in tp. 
+ * 
+ * Ideally, the underlying platform clock should be monotonic. However, the
+ * core lib tries to enforce monotonicity at higher level APIs (see tag.h). 
+ * Nonetheless, if the underlying clock is not monotonic, it can result in 
+ * identical timestamps being presented to the user programs that use those APIs.
+ */
+extern int lf_clock_gettime(lf_time_spec_t* tp);
+>>>>>>> ef99eb96f1dc17a1287be1cfd5fdd375d0809ca2
 
 /**
  * Pause execution for a number of nanoseconds.

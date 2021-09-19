@@ -65,4 +65,7 @@ typedef uint32_t _microstep_t;
 // The underlying physical clock for Linux
 #define _LF_CLOCK CLOCK_MONOTONIC
 
+// The underlying physical clock for Linux
+#define _LF_CLOCK CLOCK_MONOTONIC
+
 #endif // LF_LINUX_SUPPORT_H

@@ -40,7 +40,12 @@ THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #endif
 #endif
 
-#include "lf_unix_clock_support.c"
+/**
+ * Fetch the value of _LF_CLOCK and store it in tp.
+ */
+int lf_clock_gettime(_lf_time_spec_t* tp) {
+    return clock_gettime(_LF_CLOCK, (struct timespec*) tp);
+}
 
 /**
  * Pause execution for a number of nanoseconds.

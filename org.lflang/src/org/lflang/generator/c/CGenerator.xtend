@@ -431,12 +431,10 @@ class CGenerator extends GeneratorBase {
         }
         var OS = ""
         // Check the operating system
-        if (targetConfig.platform != "") {
+        if (targetConfig.platform != "" && targetConfig.noCompile) {
             OS = targetConfig.platform
-            if (!targetConfig.noCompile) {
-                targetConfig.noCompile = true
-                reportError("Need no-compile flag to use the platform target property.")
-            }                       
+        } else if (!targetConfig.noCompile) {
+            reportError("Need no-compile flag to use the platform target property.")            
         } else {
             OS = System.getProperty("os.name").toLowerCase();
         }       

@@ -64,4 +64,7 @@ typedef uint32_t _microstep_t;
 // The underlying physical clock for MacOS
 #define _LF_CLOCK CLOCK_MONOTONIC
 
+// The underlying physical clock for MacOS
+#define _LF_CLOCK CLOCK_MONOTONIC
+
 #endif // LF_MACOS_SUPPORT_H
