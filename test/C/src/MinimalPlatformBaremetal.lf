@@ -1,0 +1,12 @@
+//This is a smoke test for platform target property of a minimal reactor.
+target C {
+	platform: baremetal_riscv,
+	no-compile: true
+    
+};
+main reactor MinimalPlatformBaremetal {
+	timer t;
+	reaction(t) {=
+		printf("Hello World. \n");
+	=}
+}

@@ -1,0 +1,10 @@
+//This is a smoke test for platform target property of a minimal reactor.
+target C {
+	platform: windows
+};
+main reactor MinimalPlatformProperty {
+	timer t;
+	reaction(t) {=
+		printf("Hello World. \n");
+	=}
+}
