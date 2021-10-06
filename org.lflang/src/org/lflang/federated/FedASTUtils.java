@@ -413,17 +413,17 @@ public class FedASTUtils {
         VarRef sourceRef = factory.createVarRef();
         VarRef destRef = factory.createVarRef();
         Reactor parent = (Reactor)connection.eContainer();
-        Reaction r1 = factory.createReaction();
+        Reaction networkSenderReaction = factory.createReaction();
         Reaction r2 = factory.createReaction();
+        Reactor networkSenderReactor = factory.createReactor();
         
         // These reactions do not require any dependency relationship
         // to other reactions in the container.
-        generator.makeUnordered(r1);
         generator.makeUnordered(r2);
         
         // If the sender or receiver is in a bank of reactors, then we want
         // these reactions to appear only in the federate whose bank ID matches.
-        generator.setReactionBankIndex(r1, leftBankIndex);
+        generator.setReactionBankIndex(networkSenderReaction, leftBankIndex);
         generator.setReactionBankIndex(r2, rightBankIndex);
         
         // Get the serializer
@@ -490,10 +490,12 @@ public class FedASTUtils {
         // Add the action to the reactor.
         parent.getActions().add(action);
         
+        
+        
         // Configure the sending reaction.
-        r1.getTriggers().add(sourceRef);
-        r1.setCode(factory.createCode());
-        r1.getCode().setBody(generator.generateNetworkSenderBody(
+        networkSenderReaction.getTriggers().add(sourceRef);
+        networkSenderReaction.setCode(factory.createCode());
+        networkSenderReaction.getCode().setBody(generator.generateNetworkSenderBody(
             sourceRef,
             destRef,
             receivingPortID,
@@ -508,11 +510,11 @@ public class FedASTUtils {
         ));
               
         // Add the sending reaction to the parent.
-        parent.getReactions().add(r1);
+        parent.getReactions().add(networkSenderReaction);
         
         if (!connection.isPhysical()) {           
             // Add the network output control reaction to the parent
-            FedASTUtils.addNetworkOutputControlReaction(
+            addNetworkOutputControlReaction(
                 source,
                 leftFederate,
                 receivingPortID,
@@ -524,7 +526,7 @@ public class FedASTUtils {
             );
             
             // Add the network input control reaction to the parent
-            FedASTUtils.addNetworkInputControlReaction(
+            addNetworkInputControlReaction(
                 destination,
                 receivingPortID,
                 rightBankIndex,
