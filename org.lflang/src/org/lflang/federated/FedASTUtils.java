@@ -315,7 +315,7 @@ public class FedASTUtils {
         VarRef newPortRef = factory.createVarRef();
         newPortRef.setContainer(source.parent.getDefinition());
         newPortRef.setVariable(source.getDefinition());
-        reaction.getSources().add(newPortRef);
+        reaction.getTriggers().add(newPortRef);
 
         // We use a phantom input port at the top-level to manually
         // trigger output control reactions. That port is created once
