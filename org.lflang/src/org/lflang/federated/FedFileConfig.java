@@ -68,6 +68,10 @@ public class FedFileConfig extends FileConfig {
         // The generated code for each federate should be located at super.getSrcGenPath() + "/federateName/"
         this.setSrcGenPath(getSrcGenPath(this.srcGenBasePath, this.srcPkgPath,
                 this.srcPath, name + File.separator + federateName));
-    }   
+    }
+    
+    public String getFedFileName() {
+        return name + "_" + federateName;
+    }
 
 }

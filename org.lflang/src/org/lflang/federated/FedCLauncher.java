@@ -25,13 +25,12 @@
 
 package org.lflang.federated;
 
-import java.io.File;
 import java.io.IOException;
 
 import org.lflang.ErrorReporter;
 import org.lflang.FileConfig;
 import org.lflang.TargetConfig;
-import org.lflang.generator.c.CCompiler;
+import org.lflang.generator.c.CCmakeCompiler;
 
 /**
  * Utility class that can be used to create a launcher for federated LF programs
@@ -75,18 +74,18 @@ public class FedCLauncher extends FedLauncher {
         }
         
         String commandToReturn = "";
-        // FIXME: Hack to add platform support only for linux systems. 
-        // We need to fix the CMake build command for remote federates.
-        String linuxPlatformSupport = "core" + File.separator + "platform" + File.separator + "lf_linux_support.c";
-        if (!localTargetConfig.compileAdditionalSources.contains(linuxPlatformSupport)) {
-            localTargetConfig.compileAdditionalSources.add(linuxPlatformSupport);
-        }
-        CCompiler cCompiler= new CCompiler(localTargetConfig, fedFileConfig, errorReporter);
-        commandToReturn = String.join(" ", 
-                cCompiler.compileCCommand(
-                        fileConfig.name+"_"+federate.name, 
+        CCmakeCompiler cmakeCompiler= new CCmakeCompiler(localTargetConfig, fedFileConfig, errorReporter);
+        commandToReturn = String.join(" ",
+                cmakeCompiler.buildCmakeCommand(
+                        fedFileConfig.getFedFileName(), 
                         false
-                    ).toString());
+                    ).toString(), 
+                " && ",
+                cmakeCompiler.compileCmakeCommand(
+                        fedFileConfig.getFedFileName(), 
+                        false
+                    ).toString()
+                );
         return commandToReturn;
     }
     

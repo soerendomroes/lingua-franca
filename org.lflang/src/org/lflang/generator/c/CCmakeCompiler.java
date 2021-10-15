@@ -96,7 +96,8 @@ public class CCmakeCompiler extends CCompiler {
         CancelIndicator cancelIndicator
     ) throws IOException {
         // Set the build directory to be "build"
-        Path buildPath = fileConfig.getSrcGenPath().resolve("build");
+        Path buildPath = fileConfig.getSrcGenPath().relativize(
+                fileConfig.getSrcGenPath().resolve("build"));
         // Remove the previous build directory if it exists to 
         // avoid any error residue that can occur in CMake from 
         // a previous build.
@@ -185,7 +186,8 @@ public class CCmakeCompiler extends CCompiler {
             boolean noBinary
     ) {        
         // Set the build directory to be "build"
-        Path buildPath = fileConfig.getSrcGenPath().resolve("build");
+        Path buildPath = fileConfig.getSrcGenPath().relativize(
+                fileConfig.getSrcGenPath().resolve("build"));
         
         List<String> arguments =  new ArrayList<String>();
         arguments.addAll(List.of("-DCMAKE_INSTALL_PREFIX="+FileConfig.toUnixString(fileConfig.getOutPath()),
@@ -229,7 +231,8 @@ public class CCmakeCompiler extends CCompiler {
             boolean noBinary
     ) { 
         // Set the build directory to be "build"
-        Path buildPath = fileConfig.getSrcGenPath().resolve("build");
+        Path buildPath = fileConfig.getSrcGenPath().relativize(
+                fileConfig.getSrcGenPath().resolve("build"));
         String cores = String.valueOf(Runtime.getRuntime().availableProcessors());
         LFCommand command =  commandFactory.createCommand(
                 "cmake", List.of(
