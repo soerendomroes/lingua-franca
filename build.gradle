@@ -52,6 +52,7 @@ subprojects {
 	apply plugin: 'org.xtext.xtend'
 	apply from: "${rootDir}/gradle/source-layout.gradle"
 	apply plugin: 'eclipse'
+	apply plugin: 'org.jetbrains.dokka'
 
 	// generate xtend sources before kotlin compilation
 	compileKotlin.dependsOn("generateXtext")
@@ -72,9 +73,9 @@ subprojects {
 		delete "${projectDir}/xtend-gen/"
 		delete "${projectDir}/src-gen/"
 	}
+
+	tasks.named("dokkaHtml") {
+		outputDirectory.set(file("${buildDir}/dokka"))
+	}
 }
 
-// From https://kotlin.github.io/dokka/1.5.30/user_guide/gradle/usage/ but it doesn't work.
-tasks.named("dokkaHtml") {
-    outputDirectory.set(file("${buildDir}/dokka"))
-}
