@@ -75,6 +75,6 @@ subprojects {
 }
 
 // From https://kotlin.github.io/dokka/1.5.30/user_guide/gradle/usage/ but it doesn't work.
-//tasks.named("dokkaHtml") {
-//    outputDirectory.set(buildDir.resolve("dokka"))
-//}
+tasks.named("dokkaHtml") {
+    outputDirectory.set(file("${buildDir}/dokka"))
+}
