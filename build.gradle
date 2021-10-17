@@ -1,11 +1,13 @@
 buildscript {
 	ext.kotlinVersion = "1.4.10" // sync with pom.xml
+	ext.dokkaVersion = "1.5.30"
 	repositories {
 		mavenCentral()
 	}
 	dependencies {
 		classpath 'org.xtext:xtext-gradle-plugin:2.0.8'
 		classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion"
+		classpath "org.jetbrains.dokka:dokka-gradle-plugin:${dokkaVersion}"
 	}
 }
 
@@ -13,6 +15,11 @@ plugins {
 	id 'com.github.johnrengelman.shadow' version '6.0.0'
 	id 'java'
 	id 'jacoco'
+	id 'org.jetbrains.dokka' version '1.5.30'
+}
+
+repositories {
+    mavenCentral()
 }
 
 subprojects {
@@ -66,3 +73,8 @@ subprojects {
 		delete "${projectDir}/src-gen/"
 	}
 }
+
+// From https://kotlin.github.io/dokka/1.5.30/user_guide/gradle/usage/ but it doesn't work.
+//tasks.named("dokkaHtml") {
+//    outputDirectory.set(buildDir.resolve("dokka"))
+//}
