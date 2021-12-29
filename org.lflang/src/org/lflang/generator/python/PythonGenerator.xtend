@@ -1907,16 +1907,22 @@ class PythonGenerator extends CGenerator {
             return
         }
 
+        var entrypoint = '''["python3", "src-gen/«topLevelName».py"]''';
+        if (isFederated) {
+            entrypoint = '''["./wait-for-it.sh", "«federationRTIProperties.get('host').toString»:15045", "--", "python3", "src-gen/«topLevelName».py"]'''
+        }
+
         val contents = new StringBuilder()
         pr(contents, '''
             # Generated docker file for «topLevelName».lf in «srcGenPath».
             # For instructions, see: https://github.com/icyphy/lingua-franca/wiki/Containerized-Execution
             FROM python:slim
             WORKDIR /lingua-franca/«topLevelName»
-            RUN set -ex && apt-get update && apt-get install -y python3-pip
+            RUN set -ex && apt-get update && apt-get install -y python3-pip wget \
+                && wget https://raw.githubusercontent.com/vishnubob/wait-for-it/master/wait-for-it.sh && chmod +x wait-for-it.sh
             COPY . src-gen
             RUN cd src-gen && python3 setup.py install && cd ..
-            ENTRYPOINT ["python3", "src-gen/«topLevelName».py"]
+            ENTRYPOINT «entrypoint»
         ''')
         JavaGeneratorUtils.writeSourceCodeToFile(contents, dockerFile)
         println("Dockerfile for «topLevelName» written to " + dockerFile)

@@ -1299,17 +1299,20 @@ class CGenerator extends GeneratorBase {
         }
         var dockerCompiler = CCppMode ? 'g++' : 'gcc'
         var fileExtension = CCppMode ? 'cpp' : 'c'
-        var setRtiHostName = isFederated ? '''ENV RTI_HOST=«federationRTIProperties.get('host').toString»''' : ''
+        var entrypoint = '''["./bin/«topLevelName»"]''';
+        if (isFederated) {
+            entrypoint = '''["./wait-for-it.sh", "«federationRTIProperties.get('host').toString»:15045", "--", "./bin/«topLevelName»"]'''
+        }
 
         pr(contents, '''
             # Generated docker file for «topLevelName» in «srcGenPath».
             # For instructions, see: https://github.com/icyphy/lingua-franca/wiki/Containerized-Execution
             FROM «targetConfig.dockerOptions.from» AS builder
             WORKDIR /lingua-franca/«topLevelName»
-            RUN set -ex && apk add --no-cache «dockerCompiler» musl-dev cmake make
+            RUN set -ex && apk add --no-cache «dockerCompiler» musl-dev cmake make bash ca-certificates wget \
+                && update-ca-certificates && wget https://raw.githubusercontent.com/vishnubob/wait-for-it/master/wait-for-it.sh && chmod +x wait-for-it.sh
             COPY core src-gen/core
             COPY ctarget.h ctarget.c src-gen/
-            «setRtiHostName»
             COPY CMakeLists.txt \
                  «topLevelName».«fileExtension» src-gen/
             «additionalFiles»
@@ -1323,7 +1326,7 @@ class CGenerator extends GeneratorBase {
             COPY --from=builder /lingua-franca/«topLevelName»/bin/«topLevelName» ./bin/«topLevelName»
             
             # Use ENTRYPOINT not CMD so that command-line arguments go through
-            ENTRYPOINT ["./bin/«topLevelName»"]
+            ENTRYPOINT «entrypoint»
         ''')
         JavaGeneratorUtils.writeSourceCodeToFile(contents, dockerFile)
         println('''Dockerfile for «topLevelName» written to ''' + dockerFile)
@@ -1370,8 +1373,8 @@ class CGenerator extends GeneratorBase {
         dockerComposeServices.append('''«tab»«tab»build:«System.lineSeparator»''')
         dockerComposeServices.append('''«tab»«tab»«tab»context: «context»«System.lineSeparator»''')
         dockerComposeServices.append('''«tab»«tab»«tab»dockerfile: «dockerFileName»«System.lineSeparator»''')
-        dockerComposeServices.append('''«tab»«tab»command: -i 1«System.lineSeparator»''')
         if (isFederated) {
+            dockerComposeServices.append('''«tab»«tab»command: -i 1«System.lineSeparator»''')
             dockerComposeServices.append('''«tab»«tab»depends_on: [«rtiName»]«System.lineSeparator»''')
         }
     }
