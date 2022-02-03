@@ -56,28 +56,23 @@ reactor ManagerReactor(bufferSize: usize(50), numProducers: usize(40), numConsum
         if self.num_terminated_producers == self.num_producers && self.pending_data.is_empty() {
             ctx.set(finished, ());
         } else {
-            let mut consumer_id = 0;
             let mut activated_producers = 0;
-            
+
             for (consumer_available, consumer_data) in consumerAvailable.into_iter().zip(consumerData) {
                 if ctx.is_present(&consumer_available) {
                     if let Some(data) = self.pending_data.pop_front() {
                         ctx.set(consumer_data, data);
-                        
+
                         if activated_producers < self.num_producers && !self.producer_terminated[self.producer_id] {
                             ctx.set(producerCommand.get(self.producer_id), ());
                             self.producer_id = (self.producer_id + 1) % self.num_producers;
-                            activated_producers += 1;                        
+                            activated_producers += 1;
                         }
-                    }        
-                } else {
-                    break;
+                    }
                 }
-                consumer_id += 1; 
             }
-        }   
+        }
     =}
-    
     reaction(producerData) {=
         for data in producerData {
             if let Some(x) = ctx.get(&data) {
