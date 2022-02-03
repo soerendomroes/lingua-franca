@@ -28,34 +28,20 @@ target Rust {
 
 import BenchmarkRunner from "../lib/BenchmarkRunner.lf";
 
-reactor ThroughputReactor(total_messages:usize(10000)) {
-    input inReset: unit;
+reactor ThroughputReactor {
     input inMessage: unit;
-    output outFinished: unit;
-    
-    state total_messages(total_messages);
-    state messages_processed:usize(0);
-    
-    reaction(inReset) {=
-        self.messages_processed = 0;
-    =}
-    
-    reaction(inMessage) -> outFinished {=
-        self.messages_processed += 1;
+
+    reaction(inMessage) {=
         perform_computation(37.2);
-        
-        if self.messages_processed == self.total_messages {
-            ctx.set(outFinished, ());
-        }
     =}
-    
-    preamble {=  
+
+    preamble {=
         use volatile::Volatile;
-              
+
         pub fn perform_computation(theta: f64) {
             let sint = theta.sin();
             let res = sint * sint;
-            
+
             // defeat dead code elimination
             let v = Volatile::new(&res);
             let _ = v.read();
@@ -66,54 +52,35 @@ reactor ThroughputReactor(total_messages:usize(10000)) {
 reactor ThroughputProducer(total_messages:usize(10000), num_consumer:usize(60)) {
     state total_messages(total_messages);
     state num_consumer(num_consumer);
-    
+
     state messages_sent:usize(0);
     state next_consumer:usize(0);
     state num_consumer_finished:usize(0);
-    
+
     input inStart:unit;
     output outFinished:unit;
-    
-    output[num_consumer] outMessage: unit;
-    input[num_consumer] inFinished: unit;
-    output[num_consumer] outReset: unit;
-    
+
+    output outMessage: unit;
+
     logical action sendNextMessage;
-    
-    reaction(inStart) -> outReset, sendNextMessage {=    
+
+    reaction(inStart) -> sendNextMessage {=
         // reset local state
         self.messages_sent = 0;
         self.next_consumer = 0;
         self.num_consumer_finished = 0;
-        for reset in outReset {
-            ctx.set(reset, ());
-        }
-        
+
         // start execution
         ctx.schedule(sendNextMessage, Asap);
     =}
-    
-    reaction(sendNextMessage) -> outMessage, sendNextMessage {=
-        if self.messages_sent != self.total_messages {
-            for message in outMessage {
-                ctx.set(message, ());
-            }
-            self.messages_sent += 1;
-            
-            if self.messages_sent < self.total_messages {
-                ctx.schedule(sendNextMessage, Asap);
-            }
-        };
-    =}
-    
-    reaction(inFinished) -> outFinished {= 
-        for finished in inFinished {
-            if ctx.is_present(&finished) {
-                self.num_consumer_finished += 1;
-            }
-        }
 
-        if self.num_consumer_finished == self.num_consumer {
+    reaction(sendNextMessage) -> outMessage, sendNextMessage, outFinished {=
+        ctx.set(outMessage, ());
+        self.messages_sent += 1;
+
+        if self.messages_sent < self.total_messages {
+            ctx.schedule(sendNextMessage, Asap);
+        } else {
             ctx.set(outFinished, ());
         }
     =}
@@ -123,13 +90,13 @@ main reactor (num_iterations:usize(12), num_messages_per_reactor:usize(10000), n
     state num_iterations(num_iterations);
     state num_messages_per_reactor(num_messages_per_reactor);
     state num_workers(num_workers);
-    
+
     producer = new ThroughputProducer(total_messages=num_messages_per_reactor, num_consumer=num_workers);
     runner = new BenchmarkRunner(num_iterations=num_iterations);
-    
+
     runner.start -> producer.inStart;
     producer.outFinished -> runner.finished;
-    
+
     reaction(startup) {=
         print_benchmark_info("Throughput benchmark");
         print_args!(
@@ -142,13 +109,11 @@ main reactor (num_iterations:usize(12), num_messages_per_reactor:usize(10000), n
         );
         print_system_info();
     =}
-    
-    worker = new[num_workers] ThroughputReactor(total_messages=num_messages_per_reactor);
-    
-    producer.outMessage -> worker.inMessage;
-    producer.outReset -> worker.inReset;
-    worker.outFinished -> producer.inFinished;
-    
+
+    worker = new[num_workers] ThroughputReactor();
+
+    (producer.outMessage)+ -> worker.inMessage;
+
     preamble {=
         use crate::{print_args, reactors::benchmark_runner::{print_benchmark_info, print_system_info}};
     =}
