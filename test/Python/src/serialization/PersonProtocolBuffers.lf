@@ -38,6 +38,6 @@ main reactor {
         unpacked.ParseFromString(serialized_msg)
         
         # Extract and print the unpacked message.
-        print("Name: ", unpacked.name)
+        undefined_name15291838("Name: ", unpacked.name)
 	=}
 }

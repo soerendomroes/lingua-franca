@@ -176,8 +176,7 @@ public class PythonValidator extends Validator {
              *
              * @param lines The lines of output from the compiler.
              * @param i     The current index at which a message may start. Guaranteed to be less
-             *              than
-             *              {@code lines.length - 3}.
+             *              than {@code lines.length - 3}.
              * @return Whether an error message was reported.
              */
             private boolean tryReportTypical(String[] lines, int i) {
@@ -243,8 +242,8 @@ public class PythonValidator extends Validator {
             @Override
             public LFCommand getCommand(Path generatedFile) {
                 return LFCommand.get(
-                    "pylint",
-                    List.of("--output-format=json", generatedFile.getFileName().toString()),
+                    "python3",
+                    List.of("-m", "pylint", "--output-format=json", generatedFile.getFileName().toString()),
                     true,
                     fileConfig.getSrcGenPath()
                 );
@@ -252,13 +251,12 @@ public class PythonValidator extends Validator {
 
             @Override
             public Strategy getErrorReportingStrategy() {
-                return (a, b, c) -> {};
+                return (a, b, c) -> System.err.println(a);
             }
 
             @Override
             public Strategy getOutputReportingStrategy() {
                 return (validationOutput, errorReporter, codeMaps) -> {
-                    if (validationOutput.isBlank()) return;
                     try {
                         for (PylintMessage message : mapper.readValue(validationOutput, PylintMessage[].class)) {
                             if (shouldIgnore(message)) continue;

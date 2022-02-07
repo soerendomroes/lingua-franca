@@ -109,6 +109,7 @@ class ErrorInserter {
                 throw new IOException("Failed to create a swap file.");
             }
             try (PrintWriter writer = new PrintWriter(path.toFile())) {
+                lines.forEach(System.out::println); // DEBUG
                 lines.forEach(writer::println);
             }
         }
