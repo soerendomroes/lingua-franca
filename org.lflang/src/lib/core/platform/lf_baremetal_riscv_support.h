@@ -26,10 +26,6 @@ THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifndef LF_BAREMETAL_RISCV_SUPPORT_H
 #define LF_BAREMETAL_RISCV_SUPPORT_H
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> baremetal support -- t0 unknown register name error
 #ifdef NUMBER_OF_WORKERS
 #if __STDC_VERSION__ < 201112L || defined (__STDC_NO_THREADS__) // (Not C++11 or later) or no threads support
 #include "lf_POSIX_threads_support.h"
@@ -37,21 +33,9 @@ THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "lf_C11_threads_support.h"
 #endif
 #endif
-<<<<<<< HEAD
 
 typedef lf_time_spec_t;
 typedef int _lf_clock_t;
 typedef int clockid_t; //reactor.h
-=======
-
-typedef struct timespec _lf_time_spec_t;
-typedef int _lf_clock_t;
->>>>>>> added support.c and support.h files for baremetal
-=======
-
-typedef struct timespec _lf_time_spec_t;
-typedef int _lf_clock_t;
-typedef int clockid_t; //reactor.h
->>>>>>> baremetal support -- t0 unknown register name error
 
 #endif // LF_BAREMETAL_RISCV_SUPPORT_H

@@ -76,12 +76,15 @@ struct timespec clock_gettime_helper() {
     ts.tv_nsec = (long) ((uint32_t) (cycle_low * NSEC_PER_CYCLE) % BILLION);
 
     return ts;
+<<<<<<< HEAD
 
 /**
  * Fetch the value of clk_id and store it in tp.
  */
 int lf_clock_gettime(_lf_clock_t clk_id, _lf_time_spec_t* tp) {
     return clock_gettime((clockid_t)clk_id, (struct timespec*) tp);
+=======
+>>>>>>> 56dcc9aa389268101263afee96912bf3307e9eeb
 }
 
 /**
