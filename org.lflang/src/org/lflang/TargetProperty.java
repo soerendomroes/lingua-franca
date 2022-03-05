@@ -46,6 +46,8 @@ import org.lflang.lf.KeyValuePairs;
 import org.lflang.util.FileUtil;
 import org.lflang.validation.LFValidator;
 
+import com.google.common.collect.ImmutableList;
+
 /**
  * A target properties along with a type and a list of supporting targets
  * that supports it, as well as a function for configuration updates.
@@ -1292,6 +1294,7 @@ public enum TargetProperty {
      */
     public enum SchedulerOption {
         NP(false),         // Non-preemptive
+        NP2(false, List.of(Path.of("scheduler_NP2.c"), Path.of("worker_assignments.h"), Path.of("worker_states.h"))),
         GEDF_NP(true),    // Global EDF non-preemptive
         GEDF_NP_CI(true); // Global EDF non-preemptive with chain ID
         // PEDF_NP(true);    // Partitioned EDF non-preemptive (FIXME: To be re-added in a future PR)
@@ -1299,17 +1302,30 @@ public enum TargetProperty {
         /**
          * Indicate whether or not the scheduler prioritizes reactions by deadline.
          */
-        private final Boolean prioritizesDeadline;
-        
+        private final boolean prioritizesDeadline;
+
+        /** Relative paths to files required by this scheduler. */
+        private final List<Path> relativePaths;
+
+        SchedulerOption(boolean prioritizesDeadline) {
+            this(prioritizesDeadline, null);
+        }
+
+        SchedulerOption(boolean prioritizesDeadline, List<Path> relativePaths) {
+            this.prioritizesDeadline = prioritizesDeadline;
+            this.relativePaths = relativePaths;
+        }
+
         /**
          * Return true if the scheduler prioritizes reactions by deadline.
          */
-        public Boolean prioritizesDeadline() {
+        public boolean prioritizesDeadline() {
             return this.prioritizesDeadline;
         }
-        
-        private SchedulerOption(Boolean prioritizesDeadline) {
-            this.prioritizesDeadline = prioritizesDeadline;
+
+        public List<Path> getRelativePaths() {
+            return relativePaths != null ? ImmutableList.copyOf(relativePaths) :
+                   List.of(Path.of("scheduler_" + this + ".c"));
         }
         
         public static SchedulerOption getDefault() {
