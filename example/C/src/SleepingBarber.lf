@@ -194,10 +194,13 @@ reactor Customer(bank_index:size_t(0)) {
     input room_full: bool;
     input wait: bool;
     input start_cutting: bool;
+    // input in3: bool; 
     input done_cutting: bool; 
 
     output returned: bool;
     output done: bool;
+    // output out2: bool;
+    // logical action again:int; // Returning customer. Payload is customer ID.
     
     reaction (room_full) -> returned {=
         char buffer[LF_TIME_BUFFER_LENGTH];
@@ -223,6 +226,28 @@ reactor Customer(bank_index:size_t(0)) {
                 self->bank_index, buffer
         );
     =}
+    
+//    reaction (again) -> out2 {=
+//        size_t customer_id = again->value;
+//        self->attempts++;
+//        SET(send_customer, customer_id);
+//    =}
+    
+//    reaction (in3) {= 
+//        char buffer[LF_TIME_BUFFER_LENGTH];
+//        lf_readable_time(buffer, get_elapsed_logical_time());
+//        info_print("Customer %d: Started a haircut at %s.",
+//                self->bank_index, buffer
+//        );
+//    =}
+//    
+//    reaction () {= 
+//        char buffer[LF_TIME_BUFFER_LENGTH];
+//        lf_readable_time(buffer, get_elapsed_logical_time());
+//        info_print("Customer %d: Started a haircut at %s.",
+//                self->bank_index, buffer
+//        );
+//    =}
    
     reaction (done_cutting) -> done {=
         char buffer[LF_TIME_BUFFER_LENGTH];

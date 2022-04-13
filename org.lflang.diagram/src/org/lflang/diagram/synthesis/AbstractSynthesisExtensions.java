@@ -42,6 +42,10 @@ public abstract class AbstractSynthesisExtensions {
     public boolean getBooleanValue(SynthesisOption option) {
         return delegate.getBooleanValue(option);
     }
+    
+    public Object getObjectValue(final SynthesisOption option) {
+        return delegate.getObjectValue(option);
+    }
       
     public <T extends EObject> T associateWith(T derived, Object source) {
         return delegate.associateWith(derived, source);
