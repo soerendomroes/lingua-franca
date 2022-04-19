@@ -54,6 +54,7 @@ public class LayoutPostProcessing extends AbstractSynthesisExtensions {
     // Related synthesis option
     
     public static final String GREEDY_CYCLE_BREAKING = "Greedy";
+    public static final String GREEDY_MODEL_ORDER_CYCLE_BREAKING = "Greedy Model Order";
     public static final String MODEL_ORDER_CYCLE_BREAKING = "Model Order";
 
     public static final String CM_MO_OFF = "Off";
@@ -71,7 +72,7 @@ public class LayoutPostProcessing extends AbstractSynthesisExtensions {
     public static final SynthesisOption LAYOUT_CATEGORY = 
             SynthesisOption.createCategory("Layout", false).setCategory(LinguaFrancaSynthesis.APPEARANCE);
     public static final SynthesisOption CYCLE_BREAKING = 
-            SynthesisOption.createChoiceOption("Cycle Breaking", Arrays.asList(GREEDY_CYCLE_BREAKING, MODEL_ORDER_CYCLE_BREAKING), GREEDY_CYCLE_BREAKING).setCategory(LAYOUT_CATEGORY);
+            SynthesisOption.createChoiceOption("Cycle Breaking", Arrays.asList(GREEDY_CYCLE_BREAKING, GREEDY_MODEL_ORDER_CYCLE_BREAKING, MODEL_ORDER_CYCLE_BREAKING), GREEDY_CYCLE_BREAKING).setCategory(LAYOUT_CATEGORY);
     public static final SynthesisOption CM_MODEL_ORDER = 
             SynthesisOption.createChoiceOption("Model Order Crossing Minimization", Arrays.asList(CM_MO_OFF, CM_MO_NAE, CM_MO_PE), CM_MO_OFF).setCategory(LAYOUT_CATEGORY);
     public static final SynthesisOption SEPARATE_CONNECTED_COMPONENTS = 
@@ -86,6 +87,8 @@ public class LayoutPostProcessing extends AbstractSynthesisExtensions {
             SynthesisOption.createChoiceOption("Component Ordering", Arrays.asList(CP_MO_OFF, CP_MO_CONSIDER, CP_MO_STRICT), CP_MO_OFF).setCategory(LAYOUT_CATEGORY);
     public static final SynthesisOption NO_MODEL_ORDER = 
             SynthesisOption.createChoiceOption("Set model order for ", Arrays.asList(MO_ALL, MO_NO_ACTIONS, MO_NO_ACTIONS_SHUTDOWN), MO_NO_ACTIONS_SHUTDOWN).setCategory(LAYOUT_CATEGORY);
+    public static final SynthesisOption NODE_ORDER_VIOLATION_WEIGHT = 
+            SynthesisOption.createRangeOption("Node Order Violation Weight ", 0.0f, 10.0f, 0.01f, 0.0f).setCategory(LAYOUT_CATEGORY);
     
     
     public void configureMainReactor(KNode node) {
@@ -101,6 +104,9 @@ public class LayoutPostProcessing extends AbstractSynthesisExtensions {
             case MODEL_ORDER_CYCLE_BREAKING:
                 // Enable strict model order cycle breaking. This requires all reactors to have a model order.
                 DiagramSyntheses.setLayoutOption(node, LayeredOptions.CYCLE_BREAKING_STRATEGY, CycleBreakingStrategy.MODEL_ORDER);
+                break;
+            case GREEDY_MODEL_ORDER_CYCLE_BREAKING:
+                DiagramSyntheses.setLayoutOption(node, LayeredOptions.CYCLE_BREAKING_STRATEGY, CycleBreakingStrategy.GREEDY_MODEL_ORDER);
                 break;
             case GREEDY_CYCLE_BREAKING:
             default:
@@ -160,6 +166,12 @@ public class LayoutPostProcessing extends AbstractSynthesisExtensions {
         } else {
             // Default values false and two-sided are used
         }
+        
+        float nodeOrderWeight = getFloatValue(NODE_ORDER_VIOLATION_WEIGHT);
+        DiagramSyntheses.setLayoutOption(node, LayeredOptions.CONSIDER_MODEL_ORDER_CROSSING_COUNTER_NODE_INFLUENCE, (double) nodeOrderWeight);
+        DiagramSyntheses.setLayoutOption(node, LayeredOptions.THOROUGHNESS, 7);
+        
+        
         
         // Sometimes it is usefull that a reactor has no model order but since we want cycle breaking,
         // we have to remove this

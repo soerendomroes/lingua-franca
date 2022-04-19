@@ -43,6 +43,10 @@ public abstract class AbstractSynthesisExtensions {
         return delegate.getBooleanValue(option);
     }
     
+    public float getFloatValue(SynthesisOption option) {
+        return delegate.getFloatValue(option);
+    }
+    
     public Object getObjectValue(final SynthesisOption option) {
         return delegate.getObjectValue(option);
     }

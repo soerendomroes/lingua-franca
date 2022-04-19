@@ -238,7 +238,8 @@ public class LinguaFrancaSynthesis extends AbstractDiagramSynthesis<Model> {
             LayoutPostProcessing.SEPARATE_CONNECTED_COMPONENTS,
             LayoutPostProcessing.NO_CM,
             LayoutPostProcessing.COMPONENT_ORDER,
-            LayoutPostProcessing.NO_MODEL_ORDER
+            LayoutPostProcessing.NO_MODEL_ORDER,
+            LayoutPostProcessing.NODE_ORDER_VIOLATION_WEIGHT
         );
     }
     
