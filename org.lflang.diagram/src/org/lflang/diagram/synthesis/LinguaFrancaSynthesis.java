@@ -68,7 +68,7 @@ import java.util.Map;
 import java.util.Set;
 import javax.inject.Inject;
 
-import org.eclipse.elk.alg.layered.components.ComponentOrderingStrategy;
+//import org.eclipse.elk.alg.layered.components.ComponentOrderingStrategy;
 import org.eclipse.elk.alg.layered.options.CrossingMinimizationStrategy;
 import org.eclipse.elk.alg.layered.options.EdgeStraighteningStrategy;
 import org.eclipse.elk.alg.layered.options.FixedAlignment;
@@ -87,6 +87,7 @@ import org.eclipse.elk.core.options.Direction;
 import org.eclipse.elk.core.options.HierarchyHandling;
 import org.eclipse.elk.core.options.PortAlignment;
 import org.eclipse.elk.core.options.PortConstraints;
+import org.eclipse.elk.core.options.PortLabelPlacement;
 import org.eclipse.elk.core.options.PortSide;
 import org.eclipse.elk.core.options.SizeConstraint;
 import org.eclipse.elk.graph.properties.Property;
@@ -376,7 +377,7 @@ public class LinguaFrancaSynthesis extends AbstractDiagramSynthesis<Model> {
             
             // Additional layout adjustment for main node
             setLayoutOption(node, CoreOptions.ALGORITHM, LayeredOptions.ALGORITHM_ID);
-            setLayoutOption(node, CoreOptions.DIRECTION, Direction.RIGHT);
+//            setLayoutOption(node, CoreOptions.DIRECTION, Direction.RIGHT);
             setLayoutOption(node, CoreOptions.NODE_SIZE_CONSTRAINTS, EnumSet.of(SizeConstraint.MINIMUM_SIZE));
             setLayoutOption(node, LayeredOptions.NODE_PLACEMENT_BK_FIXED_ALIGNMENT, FixedAlignment.BALANCED);
             setLayoutOption(node, LayeredOptions.NODE_PLACEMENT_BK_EDGE_STRAIGHTENING, EdgeStraighteningStrategy.IMPROVE_STRAIGHTNESS);
@@ -564,7 +565,7 @@ public class LinguaFrancaSynthesis extends AbstractDiagramSynthesis<Model> {
         // Needed to enforce node positions.
 //        setLayoutOption(node, LayeredOptions.CROSSING_MINIMIZATION_SEMI_INTERACTIVE, true);
         // Costs a little more time but layout is quick, therefore, we can do that.
-        setLayoutOption(node, LayeredOptions.THOROUGHNESS, 100);
+//        setLayoutOption(node, LayeredOptions.THOROUGHNESS, 100);
         if (!getBooleanValue(SHOW_HYPERLINKS)) {
             setLayoutOption(node, CoreOptions.PADDING, new ElkPadding(2, 6, 6, 6));
             setLayoutOption(node, LayeredOptions.SPACING_NODE_NODE, LayeredOptions.SPACING_NODE_NODE.getDefault() * 0.75f);

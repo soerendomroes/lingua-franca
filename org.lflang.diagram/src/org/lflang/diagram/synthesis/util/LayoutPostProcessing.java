@@ -25,16 +25,19 @@
 package org.lflang.diagram.synthesis.util;
 
 import java.util.Arrays;
+import java.util.EnumSet;
 
 import org.eclipse.elk.alg.layered.components.ComponentOrderingStrategy;
 import org.eclipse.elk.alg.layered.options.CrossingMinimizationStrategy;
 import org.eclipse.elk.alg.layered.options.CycleBreakingStrategy;
+import org.eclipse.elk.alg.layered.options.EdgeLabelSideSelection;
 import org.eclipse.elk.alg.layered.options.GreedySwitchType;
 import org.eclipse.elk.alg.layered.options.LayeredOptions;
 import org.eclipse.elk.alg.layered.options.OrderingStrategy;
 import org.eclipse.elk.core.options.CoreOptions;
 import org.eclipse.elk.core.options.Direction;
 import org.eclipse.elk.core.options.HierarchyHandling;
+import org.eclipse.elk.core.options.PortLabelPlacement;
 import org.lflang.diagram.synthesis.AbstractSynthesisExtensions;
 import org.lflang.diagram.synthesis.LinguaFrancaSynthesis;
 
@@ -169,8 +172,12 @@ public class LayoutPostProcessing extends AbstractSynthesisExtensions {
         
         float nodeOrderWeight = getFloatValue(NODE_ORDER_VIOLATION_WEIGHT);
         DiagramSyntheses.setLayoutOption(node, LayeredOptions.CONSIDER_MODEL_ORDER_CROSSING_COUNTER_NODE_INFLUENCE, (double) nodeOrderWeight);
-        DiagramSyntheses.setLayoutOption(node, LayeredOptions.THOROUGHNESS, 7);
-        
+        DiagramSyntheses.setLayoutOption(node, LayeredOptions.THOROUGHNESS, 107);
+        DiagramSyntheses.setLayoutOption(node, LayeredOptions.EDGE_LABELS_SIDE_SELECTION, EdgeLabelSideSelection.ALWAYS_UP);
+        DiagramSyntheses.setLayoutOption(node, LayeredOptions.PORT_LABELS_PLACEMENT, EnumSet.of(PortLabelPlacement.ALWAYS_OTHER_SAME_SIDE, PortLabelPlacement.OUTSIDE, PortLabelPlacement.NEXT_TO_PORT_IF_POSSIBLE));
+        DiagramSyntheses.setLayoutOption(node, LayeredOptions.SPACING_LABEL_PORT_HORIZONTAL, 2.0);
+        DiagramSyntheses.setLayoutOption(node, LayeredOptions.SPACING_LABEL_PORT_VERTICAL, -3.0);
+//        org.eclipse.elk.layered.edgeLabels.sideSelection
         
         
         // Sometimes it is usefull that a reactor has no model order but since we want cycle breaking,
