@@ -1220,7 +1220,11 @@ public class LinguaFrancaSynthesis extends AbstractDiagramSynthesis<Model> {
       nodes.add(node);
       Iterables.addAll(nodes, createUserComments(action.getDefinition(), node));
       setLayoutOption(node, CoreOptions.PORT_CONSTRAINTS, PortConstraints.FIXED_SIDE);
-      _layoutPostProcessing.configureAction(node);
+      if (action.isPhysical()) {
+        _layoutPostProcessing.configurePhysicalAction(node);
+      } else {
+        _layoutPostProcessing.configureAction(node);
+      }
       setAnnotatedLayoutOptions(action.getDefinition(), node);
       Pair<KPort, KPort> ports =
           _linguaFrancaShapeExtensions.addActionFigureAndPorts(
@@ -1336,7 +1340,7 @@ public class LinguaFrancaSynthesis extends AbstractDiagramSynthesis<Model> {
       // try to order with reactions vertically if in one layer
       setLayoutOption(startupNode, LayeredOptions.POSITION, new KVector(0, 0));
       setLayoutOption(startupNode, LayeredOptions.LAYERING_LAYER_CONSTRAINT, LayerConstraint.FIRST);
-      _layoutPostProcessing.configureAction(startupNode);
+      _layoutPostProcessing.configureStartUp(startupNode);
 
       if (getBooleanValue(REACTIONS_USE_HYPEREDGES)) {
         KPort port = addInvisiblePort(startupNode);

@@ -60,11 +60,15 @@ public class LayoutPostProcessing extends AbstractSynthesisExtensions {
   /** Uses semi-automatic layout. */
   public static final String LEGACY = "Legacy";
   /** Only reactions are strictly ordered by their model order. */
-  public static final String STRICT_REACTION_ONLY = "Reactions Only";
+  public static final String STRICT_REACTION_ONLY = "GMO + MORO";
   /** New option. */
-  public static final String NEW_OPTION = "New Option";
+  public static final String NEW_OPTION = "SCC + GMOF";
+  /** New option. */
+  public static final String NEW_OPTION2 = "DF + GMOF";
+  /** New option. */
+  public static final String NEW_OPTION3 = "DF + GMOT";
   /** Reactions and reactor are strictly ordered by their model order. */
-  public static final String STRICT = "Reactions and Reactors";
+  public static final String STRICT = "GMO + MORR";
   /**
    * Reactions and reactors are ordered by their model order if no additional crossing are created.
    */
@@ -78,20 +82,47 @@ public class LayoutPostProcessing extends AbstractSynthesisExtensions {
   public static final SynthesisOption MODEL_ORDER =
       SynthesisOption.createChoiceOption(
               MODEL_ORDER_OPTION,
-              Arrays.asList(TIE_BREAKER, NEW_OPTION, STRICT_REACTION_ONLY, STRICT, FULL_CONTROL),
+              Arrays.asList(TIE_BREAKER, NEW_OPTION, NEW_OPTION2, NEW_OPTION3, STRICT_REACTION_ONLY, STRICT, FULL_CONTROL),
               STRICT_REACTION_ONLY)
           .setCategory(LinguaFrancaSynthesis.LAYOUT);
 
   /** GroupID for the different Node-Types */
+//  public static final int START_UP_GROUP_ID = 0;
+//
+//  public static final int REACTOR_GROUP_ID = 1;
+  // New values that might be better
+//  public static final int ACTION_GROUP_ID = 3;
+//  public static final int TIMER_GROUP_ID = 4;
+//  public static final int REACTION_GROUP_ID = 2;
+//  public static final int MODE_REACTOR_GROUP_I_D = 1;
+  // Old value
+//  public static final int DUMMY_GROUP_ID = 5;
+//  public static final int SHUT_DOWN_GROUP_ID = 7;
+//  public static final int ACTION_GROUP_ID = 6;
+//  public static final int TIMER_GROUP_ID = 3;
+//  public static final int REACTION_GROUP_ID = 4;
+//  public static final int MODE_REACTOR_GROUP_I_D = 4;
+
+//  public static final int START_UP_GROUP_ID = 0;
+//
+//  public static final int REACTOR_GROUP_ID = 1;
+//  public static final int ACTION_GROUP_ID = 2;
+//  public static final int TIMER_GROUP_ID = 3;
+//  public static final int REACTION_GROUP_ID = 4;
+//  public static final int MODE_REACTOR_GROUP_I_D = 4;
+//  public static final int DUMMY_GROUP_ID = 5;
+//  public static final int SHUT_DOWN_GROUP_ID = 7;
   public static final int START_UP_GROUP_ID = 0;
 
   public static final int REACTOR_GROUP_ID = 1;
-  public static final int ACTION_GROUP_ID = 6;
-  public static final int TIMER_GROUP_ID = 3;
-  public static final int REACTION_GROUP_ID = 4;
-  public static final int MODE_REACTOR_GROUP_I_D = 4;
-  public static final int DUMMY_GROUP_ID = 5;
-  public static final int SHUT_DOWN_GROUP_ID = 7;
+  public static final int MODE_REACTOR_GROUP_I_D = 3;
+  public static final int TIMER_GROUP_ID = 5;
+  public static final int PHYSICAL_ACTION_GROUP_ID = 6;
+  public static final int REACTION_GROUP_ID = 7;
+  public static final int ACTION_GROUP_ID = 10;
+  public static final int DUMMY_GROUP_ID = 11;
+  public static final int SHUT_DOWN_GROUP_ID = 13;
+
 
   /**
    * Comparator to sort KNodes based on the textual order of their linked instances.
@@ -160,6 +191,9 @@ public class LayoutPostProcessing extends AbstractSynthesisExtensions {
    */
   public void configureReactor(KNode node) {
     String modelOrderStrategy = (String) getObjectValue(MODEL_ORDER);
+
+    DiagramSyntheses.setLayoutOption(
+        node, LayeredOptions.CONSIDER_MODEL_ORDER_PORT_MODEL_ORDER, true);
     switch (modelOrderStrategy) {
       case LEGACY:
         // Otherwise nodes are not sorted if they are not connected
@@ -185,7 +219,7 @@ public class LayoutPostProcessing extends AbstractSynthesisExtensions {
         // Minimize number of backward edges but make decisions based on the model order if no
         // greedy best alternative exists.
         DiagramSyntheses.setLayoutOption(
-            node, LayeredOptions.CYCLE_BREAKING_STRATEGY, CycleBreakingStrategy.SCC_CONNECTIVITY);
+            node, LayeredOptions.CYCLE_BREAKING_STRATEGY, CycleBreakingStrategy.SCC_NODE_TYPE);
         // Before crossing minimization sort all nodes and edges/ports but also consider the node
         // model order.
         DiagramSyntheses.setLayoutOption(
@@ -212,6 +246,89 @@ public class LayoutPostProcessing extends AbstractSynthesisExtensions {
         // minimization.
         DiagramSyntheses.setLayoutOption(
             node, LayeredOptions.CROSSING_MINIMIZATION_GREEDY_SWITCH_TYPE, GreedySwitchType.OFF);
+        break;
+      case NEW_OPTION2:
+        // Assign GroupID
+        DiagramSyntheses.setLayoutOption(
+            node, LayeredOptions.CONSIDER_MODEL_ORDER_GROUP_I_D, REACTOR_GROUP_ID);
+        // Only set model order for reactions.
+        DiagramSyntheses.setLayoutOption(
+            node, LayeredOptions.CONSIDER_MODEL_ORDER_NO_MODEL_ORDER, false);
+        // Do tie-breaking model order cycle breaking.
+        // Minimize number of backward edges but make decisions based on the model order if no
+        // greedy best alternative exists.
+        DiagramSyntheses.setLayoutOption(
+            node, LayeredOptions.CYCLE_BREAKING_STRATEGY, CycleBreakingStrategy.DFS_NODE_ORDER);
+        // Before crossing minimization sort all nodes and edges/ports but also consider the node
+        // model order.
+
+        DiagramSyntheses.setLayoutOption(
+            node, LayeredOptions.CONSIDER_MODEL_ORDER_STRATEGY, OrderingStrategy.NODES_AND_EDGES);
+        // Separate connected components should be drawn separately.
+        DiagramSyntheses.setLayoutOption(node, LayeredOptions.SEPARATE_CONNECTED_COMPONENTS, true);
+        // Component order is enforced by looking at the minimum element with respect to model order
+        // of each component.
+        // Remember that the startUp action is always the first node.
+        DiagramSyntheses.setLayoutOption(
+            node,
+            LayeredOptions.CONSIDER_MODEL_ORDER_COMPONENTS,
+            ComponentOrderingStrategy.MODEL_ORDER);
+        DiagramSyntheses.setLayoutOption(
+            node, LayeredOptions.COMPACTION_CONNECTED_COMPONENTS, true);
+
+        // Node order should not change during crossing minimization.
+        // Since only reactions will have a model order set in this approach the order of reactions
+        // in their respective
+        // separate connected components always respects the model order.
+        DiagramSyntheses.setLayoutOption(
+            node, LayeredOptions.CROSSING_MINIMIZATION_FORCE_NODE_MODEL_ORDER, true);
+        // Disable greedy switch since this does otherwise change the node order after crossing
+        // minimization.
+        DiagramSyntheses.setLayoutOption(
+            node, LayeredOptions.CROSSING_MINIMIZATION_GREEDY_SWITCH_TYPE, GreedySwitchType.OFF);
+        break;
+      case NEW_OPTION3:
+        // Assign GroupID
+        DiagramSyntheses.setLayoutOption(
+            node, LayeredOptions.CONSIDER_MODEL_ORDER_GROUP_I_D, REACTOR_GROUP_ID);
+        // Only set model order for reactions.
+        DiagramSyntheses.setLayoutOption(
+            node, LayeredOptions.CONSIDER_MODEL_ORDER_NO_MODEL_ORDER, false);
+        // Do tie-breaking model order cycle breaking.
+        // Minimize number of backward edges but make decisions based on the model order if no
+        // greedy best alternative exists.
+        DiagramSyntheses.setLayoutOption(
+            node, LayeredOptions.CYCLE_BREAKING_STRATEGY, CycleBreakingStrategy.DFS_NODE_ORDER);
+        // Before crossing minimization sort all nodes and edges/ports but also consider the node
+        // model order.
+        DiagramSyntheses.setLayoutOption(
+            node, LayeredOptions.CONSIDER_MODEL_ORDER_STRATEGY, OrderingStrategy.NODES_AND_EDGES);
+        // Separate connected components should be drawn separately.
+        DiagramSyntheses.setLayoutOption(node, LayeredOptions.SEPARATE_CONNECTED_COMPONENTS, true);
+        // Component order is enforced by looking at the minimum element with respect to model order
+        // of each component.
+        // Remember that the startUp action is always the first node.
+        DiagramSyntheses.setLayoutOption(
+            node,
+            LayeredOptions.CONSIDER_MODEL_ORDER_COMPONENTS,
+            ComponentOrderingStrategy.MODEL_ORDER);
+        DiagramSyntheses.setLayoutOption(
+            node, LayeredOptions.COMPACTION_CONNECTED_COMPONENTS, true);
+        DiagramSyntheses.setLayoutOption(
+            node, LayeredOptions.CONSIDER_MODEL_ORDER_CROSSING_COUNTER_NODE_INFLUENCE, 0.1);
+        // Increase the number of tries with different starting configurations.
+        DiagramSyntheses.setLayoutOption(node, LayeredOptions.THOROUGHNESS, 100);
+
+        // Node order should not change during crossing minimization.
+        // Since only reactions will have a model order set in this approach the order of reactions
+        // in their respective
+        // separate connected components always respects the model order.
+//        DiagramSyntheses.setLayoutOption(
+//            node, LayeredOptions.CROSSING_MINIMIZATION_FORCE_NODE_MODEL_ORDER, true);
+//        // Disable greedy switch since this does otherwise change the node order after crossing
+//        // minimization.
+//        DiagramSyntheses.setLayoutOption(
+//            node, LayeredOptions.CROSSING_MINIMIZATION_GREEDY_SWITCH_TYPE, GreedySwitchType.OFF);
         break;
       case STRICT_REACTION_ONLY:
         // Only set model order for reactions.
@@ -337,10 +454,14 @@ public class LayoutPostProcessing extends AbstractSynthesisExtensions {
         // then all reactors, then all actions, ...
         // but by their model order. In other approaches ordering actions between the reactions has
         // no effect.
+//        DiagramSyntheses.setLayoutOption(
+//            node, LayeredOptions.CROSSING_MINIMIZATION_FORCE_NODE_MODEL_ORDER, true);
         DiagramSyntheses.setLayoutOption(
             node, LayeredOptions.CROSSING_MINIMIZATION_STRATEGY, CrossingMinimizationStrategy.NONE);
-        DiagramSyntheses.setLayoutOption(
-            node, LayeredOptions.CROSSING_MINIMIZATION_GREEDY_SWITCH_TYPE, GreedySwitchType.OFF);
+        DiagramSyntheses.setLayoutOption(node,
+                LayeredOptions.CROSSING_MINIMIZATION_GREEDY_SWITCH_TYPE, GreedySwitchType.OFF);
+//        DiagramSyntheses.setLayoutOption(node,
+//                LayeredOptions.CROSSING_MINIMIZATION_GREEDY_SWITCH_TYPE, GreedySwitchType.OFF);
 
         break;
       default:
@@ -376,9 +497,50 @@ public class LayoutPostProcessing extends AbstractSynthesisExtensions {
             node, LayeredOptions.CONSIDER_MODEL_ORDER_NO_MODEL_ORDER, false);
         break;
       case NEW_OPTION:
+      case NEW_OPTION2:
+      case NEW_OPTION3:
         // Assign GroupID
         DiagramSyntheses.setLayoutOption(
             node, LayeredOptions.CONSIDER_MODEL_ORDER_GROUP_I_D, ACTION_GROUP_ID);
+        break;
+      default:
+        // Do nothing.
+    }
+  }
+
+  /**
+   * Configures layout options for an action.
+   *
+   * @param node The KNode of an action.
+   */
+  public void configurePhysicalAction(KNode node) {
+    String modelOrderStrategy = (String) getObjectValue(MODEL_ORDER);
+//    // Assign GroupID
+//    DiagramSyntheses.setLayoutOption(
+//        node, LayeredOptions.CONSIDER_MODEL_ORDER_GROUP_I_D, ACTION_GROUP_ID);
+
+    switch (modelOrderStrategy) {
+      case STRICT_REACTION_ONLY:
+      case STRICT:
+      case TIE_BREAKER:
+        // Actions have no model order since their ordering in the model cannot be compared to the
+        // order of
+        // for example reactions since they are generally defined below in inputs/outputs and above
+        // the reactions.
+        DiagramSyntheses.setLayoutOption(
+            node, LayeredOptions.CONSIDER_MODEL_ORDER_NO_MODEL_ORDER, true);
+        break;
+      case FULL_CONTROL:
+        // Give actions a model order since they should be controllable too.
+        DiagramSyntheses.setLayoutOption(
+            node, LayeredOptions.CONSIDER_MODEL_ORDER_NO_MODEL_ORDER, false);
+        break;
+      case NEW_OPTION:
+      case NEW_OPTION2:
+      case NEW_OPTION3:
+        // Assign GroupID
+        DiagramSyntheses.setLayoutOption(
+            node, LayeredOptions.CONSIDER_MODEL_ORDER_GROUP_I_D, PHYSICAL_ACTION_GROUP_ID);
         break;
       default:
         // Do nothing.
@@ -413,6 +575,8 @@ public class LayoutPostProcessing extends AbstractSynthesisExtensions {
             node, LayeredOptions.CONSIDER_MODEL_ORDER_NO_MODEL_ORDER, false);
         break;
       case NEW_OPTION:
+      case NEW_OPTION2:
+      case NEW_OPTION3:
         // Assign GroupID
         DiagramSyntheses.setLayoutOption(
             node, LayeredOptions.CONSIDER_MODEL_ORDER_GROUP_I_D, TIMER_GROUP_ID);
@@ -431,7 +595,7 @@ public class LayoutPostProcessing extends AbstractSynthesisExtensions {
     // Nothing should be done. Model order is considered per default value.
     // The actual ordering of this node has to be done in the synthesis.
     String modelOrderStrategy = (String) getObjectValue(MODEL_ORDER);
-    if (modelOrderStrategy == NEW_OPTION) {
+    if (modelOrderStrategy == NEW_OPTION || modelOrderStrategy == NEW_OPTION2 || modelOrderStrategy == NEW_OPTION3) {
       // Assign GroupID
       DiagramSyntheses.setLayoutOption(
           node, LayeredOptions.CONSIDER_MODEL_ORDER_GROUP_I_D, START_UP_GROUP_ID);
@@ -463,6 +627,8 @@ public class LayoutPostProcessing extends AbstractSynthesisExtensions {
             node, LayeredOptions.CONSIDER_MODEL_ORDER_NO_MODEL_ORDER, true);
         break;
       case NEW_OPTION:
+      case NEW_OPTION2:
+      case NEW_OPTION3:
         // Assign GroupID
         DiagramSyntheses.setLayoutOption(
             node, LayeredOptions.CONSIDER_MODEL_ORDER_GROUP_I_D, SHUT_DOWN_GROUP_ID);
@@ -481,7 +647,7 @@ public class LayoutPostProcessing extends AbstractSynthesisExtensions {
   public void configureReaction(KNode node) {
     // Has no internal behavior and model order is set by default.
     String modelOrderStrategy = (String) getObjectValue(MODEL_ORDER);
-    if (modelOrderStrategy == NEW_OPTION) {
+    if (modelOrderStrategy == NEW_OPTION || modelOrderStrategy == NEW_OPTION2 || modelOrderStrategy == NEW_OPTION3) {
       // Assign GroupID
       DiagramSyntheses.setLayoutOption(
           node, LayeredOptions.CONSIDER_MODEL_ORDER_GROUP_I_D, REACTION_GROUP_ID);
@@ -509,6 +675,8 @@ public class LayoutPostProcessing extends AbstractSynthesisExtensions {
             node, LayeredOptions.CONSIDER_MODEL_ORDER_NO_MODEL_ORDER, true);
         break;
       case NEW_OPTION:
+      case NEW_OPTION2:
+      case NEW_OPTION3:
         // Assign GroupID
         DiagramSyntheses.setLayoutOption(
             node, LayeredOptions.CONSIDER_MODEL_ORDER_GROUP_I_D, DUMMY_GROUP_ID);
@@ -533,6 +701,8 @@ public class LayoutPostProcessing extends AbstractSynthesisExtensions {
 
   public void configureModeReactor(KNode node) {
     configureReaction(node);
+    DiagramSyntheses.setLayoutOption(
+        node, LayeredOptions.CONSIDER_MODEL_ORDER_NO_MODEL_ORDER, false);
     String modelOrderStrategy = (String) getObjectValue(MODEL_ORDER);
 //  // Assign GroupID
 //  DiagramSyntheses.setLayoutOption(
@@ -548,6 +718,8 @@ public class LayoutPostProcessing extends AbstractSynthesisExtensions {
           node, LayeredOptions.CONSIDER_MODEL_ORDER_NO_MODEL_ORDER, true);
       break;
     case NEW_OPTION:
+    case NEW_OPTION2:
+    case NEW_OPTION3:
       // Assign GroupID
       DiagramSyntheses.setLayoutOption(
           node, LayeredOptions.CONSIDER_MODEL_ORDER_GROUP_I_D, MODE_REACTOR_GROUP_I_D);

@@ -27,6 +27,7 @@ package org.lflang.diagram.synthesis.util;
 import com.google.common.collect.LinkedHashMultimap;
 import com.google.inject.Inject;
 import de.cau.cs.kieler.klighd.SynthesisOption;
+import de.cau.cs.kieler.klighd.kgraph.EMapPropertyHolder;
 import de.cau.cs.kieler.klighd.kgraph.KEdge;
 import de.cau.cs.kieler.klighd.kgraph.KIdentifier;
 import de.cau.cs.kieler.klighd.kgraph.KLabel;
@@ -64,6 +65,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 import org.eclipse.elk.alg.layered.options.CenterEdgeLabelPlacementStrategy;
 import org.eclipse.elk.alg.layered.options.EdgeStraighteningStrategy;
@@ -71,6 +73,8 @@ import org.eclipse.elk.alg.layered.options.FixedAlignment;
 import org.eclipse.elk.alg.layered.options.LayerConstraint;
 import org.eclipse.elk.alg.layered.options.LayeredOptions;
 import org.eclipse.elk.alg.layered.options.NodePlacementStrategy;
+import org.eclipse.elk.core.data.LayoutMetaDataService;
+import org.eclipse.elk.core.data.LayoutOptionData;
 import org.eclipse.elk.core.math.ElkPadding;
 import org.eclipse.elk.core.options.CoreOptions;
 import org.eclipse.elk.core.options.Direction;
@@ -78,10 +82,12 @@ import org.eclipse.elk.core.options.EdgeRouting;
 import org.eclipse.elk.core.options.PortConstraints;
 import org.eclipse.elk.core.options.PortLabelPlacement;
 import org.eclipse.elk.core.options.PortSide;
+import org.eclipse.emf.ecore.EObject;
 import org.eclipse.emf.ecore.util.EcoreUtil;
 import org.eclipse.xtext.xbase.lib.Extension;
 import org.eclipse.xtext.xbase.lib.IterableExtensions;
 import org.eclipse.xtext.xbase.lib.Pair;
+import org.lflang.AttributeUtils;
 import org.lflang.diagram.synthesis.AbstractSynthesisExtensions;
 import org.lflang.diagram.synthesis.LinguaFrancaSynthesis;
 import org.lflang.diagram.synthesis.action.MemorizingExpandCollapseAction;
@@ -104,6 +110,9 @@ import org.lflang.lf.Timer;
  */
 @ViewSynthesisShared
 public class ModeDiagrams extends AbstractSynthesisExtensions {
+  /** Service class for accessing layout options by name */
+  private static final LayoutMetaDataService LAYOUT_OPTIONS_SERVICE =
+      LayoutMetaDataService.getInstance();
 
   // Related synthesis option
   public static final SynthesisOption MODES_CATEGORY =
@@ -129,6 +138,7 @@ public class ModeDiagrams extends AbstractSynthesisExtensions {
   @Inject @Extension private LinguaFrancaStyleExtensions _linguaFrancaStyleExtensions;
   @Inject @Extension private UtilityExtensions _utilityExtensions;
   @Inject @Extension private LayoutPostProcessing _layoutPostProcessing;
+  @Inject @Extension private LinguaFrancaSynthesis synthesis;
 
   @Extension private KRenderingFactory _kRenderingFactory = KRenderingFactory.eINSTANCE;
 
@@ -303,7 +313,7 @@ public class ModeDiagrams extends AbstractSynthesisExtensions {
       // Use general layout configuration of reactors
       this.<LinguaFrancaSynthesis>getRootSynthesis()
           .configureReactorNodeLayout(modeContainer, false);
-      _layoutPostProcessing.configureReactor(modeContainer);
+      _layoutPostProcessing.configureModeReactor(modeContainer);
       // Adjust for state machine style
       // Create alternating directions to make the model more compact
       DiagramSyntheses.setLayoutOption(modeContainer, CoreOptions.DIRECTION, Direction.DOWN);
@@ -340,6 +350,7 @@ public class ModeDiagrams extends AbstractSynthesisExtensions {
             modeContainer.getProperty(LayeredOptions.SPACING_NODE_NODE_BETWEEN_LAYERS)
                 + (getBooleanValue(SHOW_TRANSITION_LABELS) ? 6.0 : 10.0));
       }
+      synthesis.setAnnotatedLayoutOptions(reactor.reactorDefinition, modeContainer);
 
       var modeContainerPorts = new HashMap<KPort, KPort>();
       for (var mode : reactor.modes) {
@@ -531,8 +542,8 @@ public class ModeDiagrams extends AbstractSynthesisExtensions {
                       EnumSet.of(
                           PortLabelPlacement.ALWAYS_OTHER_SAME_SIDE, PortLabelPlacement.OUTSIDE));
                   // Place freely
-                  DiagramSyntheses.setLayoutOption(
-                      dummyNode, LayeredOptions.CONSIDER_MODEL_ORDER_NO_MODEL_ORDER, true);
+//                  DiagramSyntheses.setLayoutOption(
+//                      dummyNode, LayeredOptions.CONSIDER_MODEL_ORDER_NO_MODEL_ORDER, true);
                   // Switch port side
                   DiagramSyntheses.setLayoutOption(
                       copy,
@@ -740,5 +751,21 @@ public class ModeDiagrams extends AbstractSynthesisExtensions {
         _kRenderingExtensions.createKPosition(
             _kRenderingExtensions.RIGHT, 5, 0, _kRenderingExtensions.TOP, 4, 0));
     _kRenderingExtensions.setForeground(innerLine, MODE_FG);
+  }
+
+  /**
+   * Searches the "@layout" annotations and applies them to the corresponding element.
+   *
+   * @param kgraphElement The view model element to apply the layout options to, e.g. a KNode.
+   * @param modelElement The model element that has the annotations, e.g. a reactor.
+   */
+  public void setAnnotatedLayoutOptions(EObject modelElement, EMapPropertyHolder kgraphElement) {
+    Map<String, String> options = AttributeUtils.getLayoutOption(modelElement);
+    for (String key : options.keySet()) {
+      LayoutOptionData data = LAYOUT_OPTIONS_SERVICE.getOptionDataBySuffix(key);
+      if (data != null) {
+        kgraphElement.setProperty(data, data.parseValue(options.get(key)));
+      }
+    }
   }
 }
